@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebXR Depth Point</title>
+  <style>
+    #depthDisplay {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background-color: rgba(0, 0, 0, 0.5);
+      padding: 5px;
+      border-radius: 3px;
+      font-size: 1.2em;
+    }
+  </style>
+</head>
+<body>
+  <button onclick="activateXR()">Start AR</button>
+  <div id="depthDisplay">Depth: N/A</div>
+  <script>
+    async function activateXR() {
+      try {
+        const session = await navigator.xr.requestSession("immersive-ar");
+        const gl = document.createElement("canvas").getContext("webgl", { xrCompatible: true });
+        
+        session.updateRenderState({
+          baseLayer: new XRWebGLLayer(session, gl)
+        });
+
+        const referenceSpace = await session.requestReferenceSpace('local');
+        const depthDisplay = document.getElementById('depthDisplay');
+
+        const onXRFrame = (time, frame) => {
+          session.requestAnimationFrame(onXRFrame);
+          const viewerPose = frame.getViewerPose(referenceSpace);
+
+          if (viewerPose) {
+            const view = viewerPose.views[0];
+            const depthInfo = frame.getDepthInformation(view);
+
+            if (depthInfo) {
+              const { data, width, height, rawValueToMeters } = depthInfo;
+              const centerX = Math.floor(width / 2);
+              const centerY = Math.floor(height / 2);
+              const centerIndex = centerY * width + centerX;
+
+              // Retrieve the raw depth value at the center
+              const depthValue = data[centerIndex];
+              const distanceInMeters = rawValueToMeters(depthValue);
+
+              depthDisplay.textContent = `Depth at center: ${distanceInMeters.toFixed(2)} meters`;
+            }
+          }
+        };
+
+        session.requestAnimationFrame(onXRFrame);
+      } catch (error) {
+        console.error('Failed to start WebXR session:', error);
+      }
+    }
+  </script>
+</body>
+</html>
