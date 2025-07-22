@@ -58,12 +58,13 @@
       from {bottom: 30px; opacity: 1;}
       to {bottom: 0; opacity: 0;}
     }
-    canvas {
+    #depthCanvas {
       position: absolute;
       top: 0;
       left: 0;
       width: 100%;
       height: 100%;
+      z-index: 5; /* Ensure canvas is above the camera feed */
     }
   </style>
 </head>
@@ -83,7 +84,11 @@
 
     async function activateXR() {
       try {
-        const session = await navigator.xr.requestSession("immersive-ar");
+        const session = await navigator.xr.requestSession("immersive-ar", {
+          requiredFeatures: ['local'],
+          optionalFeatures: ['depth-sensing']
+        });
+        
         const glCanvas = document.getElementById('depthCanvas');
         const gl = glCanvas.getContext("webgl", { xrCompatible: true });
         
@@ -114,8 +119,9 @@
 
               depthDisplay.textContent = `Depth at center: ${distanceInMeters.toFixed(2)} meters`;
 
-              // Use 2D context for simplicity
+              // Use WebGL to render depth data
               const ctx = glCanvas.getContext('2d');
+              ctx.clearRect(0, 0, glCanvas.width, glCanvas.height);  // Clear previous frame
               const imageData = ctx.createImageData(width, height);
               for (let i = 0; i < data.length; i++) {
                 const depth = rawValueToMeters(data[i]);
