@@ -5,20 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebXR Depth Point</title>
   <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
     #depthDisplay {
       position: absolute;
-      top: 10px;
+      top: 50px; /* Adjust this to move the text below the button */
       left: 10px;
       color: white;
       background-color: rgba(0, 0, 0, 0.5);
       padding: 5px;
       border-radius: 3px;
       font-size: 1.2em;
+      z-index: 10; /* Ensure it's on top of other elements */
+    }
+    #startButton {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 20; /* Ensure the button is above the depth text */
     }
   </style>
 </head>
 <body>
-  <button onclick="activateXR()">Start AR</button>
+  <button id="startButton" onclick="activateXR()">Start AR</button>
   <div id="depthDisplay">Depth: N/A</div>
   <script>
     async function activateXR() {
