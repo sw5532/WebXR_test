@@ -62,6 +62,7 @@
             const depthInfo = frame.getDepthInformation(view);
 
             if (depthInfo) {
+              console.log("Depth info available");  // Debugging info
               const { data, width, height, rawValueToMeters } = depthInfo;
               const centerX = Math.floor(width / 2);
               const centerY = Math.floor(height / 2);
@@ -72,20 +73,20 @@
 
               depthDisplay.textContent = `Depth at center: ${distanceInMeters.toFixed(2)} meters`;
 
-              // Render depth data as colors on the canvas
-              const depthImageData = new Uint8Array(width * height * 4);
+              // Use 2D context for simplicity
+              const ctx = glCanvas.getContext('2d');
+              const imageData = ctx.createImageData(width, height);
               for (let i = 0; i < data.length; i++) {
                 const depth = rawValueToMeters(data[i]);
                 const color = Math.min(255, Math.floor((1 - depth / 10) * 255)); // Adjust '10' for range
-                depthImageData[i * 4] = color;     // R
-                depthImageData[i * 4 + 1] = color; // G
-                depthImageData[i * 4 + 2] = 255;   // B
-                depthImageData[i * 4 + 3] = 255;   // A
+                imageData.data[i * 4] = color;     // R
+                imageData.data[i * 4 + 1] = color; // G
+                imageData.data[i * 4 + 2] = 255;   // B
+                imageData.data[i * 4 + 3] = 255;   // A
               }
-
-              const depthTexture = new ImageData(new Uint8ClampedArray(depthImageData), width, height);
-              const ctx = glCanvas.getContext('2d');
-              ctx.putImageData(depthTexture, 0, 0);
+              ctx.putImageData(imageData, 0, 0);
+            } else {
+              console.log("Depth info not available");  // Debugging info
             }
           }
         };
