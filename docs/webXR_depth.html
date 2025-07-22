@@ -5,143 +5,218 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebXR Depth Visualization</title>
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-    }
-    #depthDisplay {
-      position: absolute;
-      top: 50px;
-      left: 10px;
-      color: white;
-      background-color: rgba(0, 0, 0, 0.5);
-      padding: 5px;
-      border-radius: 3px;
-      font-size: 1.2em;
-      z-index: 10;
-    }
-    #startButton {
+    body { margin: 0; overflow: hidden; }
+    #glCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+    #info {
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 20;
-      padding: 10px 20px;
+      color: white;
       background-color: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10;
+      font-family: sans-serif;
+    }
+    #startButton {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      padding: 12px 24px;
+      background-color: #007bff;
       color: white;
       border: none;
       border-radius: 5px;
       cursor: pointer;
-    }
-    .toast {
-      visibility: hidden;
-      min-width: 200px;
-      margin-left: -125px;
-      background-color: rgba(0, 0, 0, 0.8);
-      color: white;
-      text-align: center;
-      border-radius: 2px;
-      position: fixed;
-      z-index: 30;
-      left: 50%;
-      bottom: 30px;
-      font-size: 17px;
-    }
-    .toast.show {
-      visibility: visible;
-      animation: fadein 0.5s, fadeout 0.5s 2.5s;
-    }
-    @keyframes fadein {
-      from {bottom: 0; opacity: 0;}
-      to {bottom: 30px; opacity: 1;}
-    }
-    @keyframes fadeout {
-      from {bottom: 30px; opacity: 1;}
-      to {bottom: 0; opacity: 0;}
-    }
-    #depthCanvas {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      z-index: 5; /* Ensure canvas is above the camera feed */
+      font-size: 16px;
     }
   </style>
 </head>
 <body>
-  <canvas id="depthCanvas"></canvas>
-  <button id="startButton" onclick="activateXR()">Start AR</button>
-  <div id="depthDisplay">Depth: N/A</div>
-  <div id="toast" class="toast">Depth data available!</div>
+  <canvas id="glCanvas"></canvas>
+  <div id="info">
+    <div id="depthDisplay">Depth at center: N/A</div>
+    <div id="status">Click "Start AR" to begin</div>
+  </div>
+  <button id="startButton">Start AR</button>
+
+  <!-- Vertex Shader: Renders a simple quad -->
+  <script id="vertex-shader" type="x-shader/x-vertex">
+    attribute vec2 a_position;
+    varying vec2 v_texcoord;
+    void main() {
+      gl_Position = vec4(a_position, 0.0, 1.0);
+      v_texcoord = a_position * 0.5 + 0.5;
+      v_texcoord.y = 1.0 - v_texcoord.y;
+    }
+  </script>
+
+  <!-- Fragment Shader: Visualizes the depth texture -->
+  <script id="fragment-shader" type="x-shader/x-fragment">
+    precision mediump float;
+    uniform sampler2D u_depthTexture;
+    varying vec2 v_texcoord;
+
+    void main() {
+      // The depth value is often packed into the red and alpha channels
+      vec2 packedDepth = texture2D(u_depthTexture, v_texcoord).ra;
+      float depth = dot(packedDepth, vec2(1.0, 255.0)); // Unpack the 16-bit depth
+      
+      // Visualize depth: further distances are darker
+      float grey = 1.0 - clamp(depth / 10.0, 0.0, 1.0); // Adjust '10.0' for depth range
+      gl_FragColor = vec4(grey, grey, grey, 1.0);
+    }
+  </script>
+
   <script>
-    function showToast() {
-      const toast = document.getElementById("toast");
-      toast.className = "toast show";
-      setTimeout(() => {
-        toast.className = toast.className.replace("show", "");
-      }, 3000);
+    const startButton = document.getElementById('startButton');
+    const depthDisplay = document.getElementById('depthDisplay');
+    const statusDisplay = document.getElementById('status');
+    const glCanvas = document.getElementById('glCanvas');
+
+    let xrSession = null;
+    let gl = null;
+    let xrReferenceSpace = null;
+    let shaderProgram;
+    let positionBuffer;
+    let depthTextureUniform;
+
+    function initWebGL() {
+      gl = glCanvas.getContext('webgl', { xrCompatible: true });
+      if (!gl) {
+        statusDisplay.textContent = 'WebGL is not supported.';
+        return false;
+      }
+
+      const vsSource = document.getElementById('vertex-shader').textContent;
+      const fsSource = document.getElementById('fragment-shader').textContent;
+      const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+      const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+      shaderProgram = createProgram(gl, vertexShader, fragmentShader);
+
+      depthTextureUniform = gl.getUniformLocation(shaderProgram, 'u_depthTexture');
+      const positionAttributeLocation = gl.getAttribLocation(shaderProgram, "a_position");
+
+      positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      const positions = [-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+      gl.enableVertexAttribArray(positionAttributeLocation);
+      gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+      
+      return true;
     }
 
+    startButton.addEventListener('click', async () => {
+      if (xrSession) {
+        xrSession.end();
+      } else {
+        if (initWebGL()) {
+          activateXR();
+        }
+      }
+    });
+    
     async function activateXR() {
       try {
-        const session = await navigator.xr.requestSession("immersive-ar", {
-          requiredFeatures: ['local'],
-          optionalFeatures: ['depth-sensing']
-        });
-        
-        const glCanvas = document.getElementById('depthCanvas');
-        const gl = glCanvas.getContext("webgl", { xrCompatible: true });
-        
-        session.updateRenderState({
-          baseLayer: new XRWebGLLayer(session, gl)
-        });
-
-        const referenceSpace = await session.requestReferenceSpace('local');
-        const depthDisplay = document.getElementById('depthDisplay');
-
-        const onXRFrame = (time, frame) => {
-          session.requestAnimationFrame(onXRFrame);
-          const viewerPose = frame.getViewerPose(referenceSpace);
-
-          if (viewerPose) {
-            const view = viewerPose.views[0];
-            const depthInfo = frame.getDepthInformation(view);
-
-            if (depthInfo) {
-              showToast();  // Show toast when depth info is available
-              const { data, width, height, rawValueToMeters } = depthInfo;
-              const centerX = Math.floor(width / 2);
-              const centerY = Math.floor(height / 2);
-              const centerIndex = centerY * width + centerX;
-
-              const depthValue = data[centerIndex];
-              const distanceInMeters = rawValueToMeters(depthValue);
-
-              depthDisplay.textContent = `Depth at center: ${distanceInMeters.toFixed(2)} meters`;
-
-              // Use WebGL to render depth data
-              const ctx = glCanvas.getContext('2d');
-              ctx.clearRect(0, 0, glCanvas.width, glCanvas.height);  // Clear previous frame
-              const imageData = ctx.createImageData(width, height);
-              for (let i = 0; i < data.length; i++) {
-                const depth = rawValueToMeters(data[i]);
-                const color = Math.min(255, Math.floor((1 - depth / 10) * 255)); // Adjust '10' for range
-                imageData.data[i * 4] = color;     // R
-                imageData.data[i * 4 + 1] = color; // G
-                imageData.data[i * 4 + 2] = 255;   // B
-                imageData.data[i * 4 + 3] = 255;   // A
-              }
-              ctx.putImageData(imageData, 0, 0);
-            } else {
-              console.log("Depth info not available");  // Debugging info
-            }
+        // Requesting the session with 'depth-sensing' as a required feature
+        xrSession = await navigator.xr.requestSession("immersive-ar", {
+          requiredFeatures: ['local', 'depth-sensing'],
+          depthSensing: { // Specify preferences for depth data
+            usagePreference: ['cpu-optimized'],
+            dataFormatPreference: ['luminance-alpha']
           }
-        };
+        });
 
-        session.requestAnimationFrame(onXRFrame);
-      } catch (error) {
-        console.error('Failed to start WebXR session:', error);
+        statusDisplay.textContent = 'AR Session Started';
+        startButton.textContent = 'Exit AR';
+
+        xrSession.addEventListener('end', () => {
+          xrSession = null;
+          startButton.textContent = 'Start AR';
+          statusDisplay.textContent = 'Click "Start AR" to begin';
+          depthDisplay.textContent = 'Depth at center: N/A';
+        });
+
+        await xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
+        xrReferenceSpace = await xrSession.requestReferenceSpace('local');
+        
+        xrSession.requestAnimationFrame(onXRFrame);
+
+      } catch (e) {
+        console.error("Failed to start AR session:", e);
+        statusDisplay.textContent = `Error: ${e.message}`;
       }
+    }
+
+    function onXRFrame(time, frame) {
+      if (!xrSession) return;
+      
+      xrSession.requestAnimationFrame(onXRFrame);
+      
+      const pose = frame.getViewerPose(xrReferenceSpace);
+      if (!pose) return;
+
+      const glLayer = xrSession.renderState.baseLayer;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+      for (const view of pose.views) {
+        const viewport = glLayer.getViewport(view);
+        gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+
+        const depthInfo = frame.getDepthInformation(view);
+        if (depthInfo) {
+          // --- Depth Value Display ---
+          const centerX = depthInfo.width / 2;
+          const centerY = depthInfo.height / 2;
+          const depthInMeters = depthInfo.getDepthInMeters(centerX, centerY);
+          if (depthInMeters) {
+            depthDisplay.textContent = `Depth at center: ${depthInMeters.toFixed(2)}m`;
+          }
+
+          // --- WebGL Depth Visualization ---
+          const depthTexture = glLayer.getDepthInformation(view).texture;
+
+          gl.useProgram(shaderProgram);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+          gl.uniform1i(depthTextureUniform, 0);
+
+          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+          
+        } else {
+          depthDisplay.textContent = 'Depth not available for this frame.';
+        }
+      }
+    }
+
+    // --- WebGL Helper Functions ---
+    function createShader(gl, type, source) {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    }
+
+    function createProgram(gl, vertexShader, fragmentShader) {
+      const program = gl.createProgram();
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+        return null;
+      }
+      return program;
     }
   </script>
 </body>
