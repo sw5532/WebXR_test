@@ -25,6 +25,12 @@
       top: 10px;
       left: 10px;
       z-index: 20;
+      padding: 10px 20px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
     }
     canvas {
       position: absolute;
@@ -36,9 +42,9 @@
   </style>
 </head>
 <body>
+  <canvas id="depthCanvas"></canvas>
   <button id="startButton" onclick="activateXR()">Start AR</button>
   <div id="depthDisplay">Depth: N/A</div>
-  <canvas id="depthCanvas"></canvas>
   <script>
     async function activateXR() {
       try {
