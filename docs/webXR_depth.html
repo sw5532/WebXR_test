@@ -32,6 +32,32 @@
       border-radius: 5px;
       cursor: pointer;
     }
+    .toast {
+      visibility: hidden;
+      min-width: 200px;
+      margin-left: -125px;
+      background-color: rgba(0, 0, 0, 0.8);
+      color: white;
+      text-align: center;
+      border-radius: 2px;
+      position: fixed;
+      z-index: 30;
+      left: 50%;
+      bottom: 30px;
+      font-size: 17px;
+    }
+    .toast.show {
+      visibility: visible;
+      animation: fadein 0.5s, fadeout 0.5s 2.5s;
+    }
+    @keyframes fadein {
+      from {bottom: 0; opacity: 0;}
+      to {bottom: 30px; opacity: 1;}
+    }
+    @keyframes fadeout {
+      from {bottom: 30px; opacity: 1;}
+      to {bottom: 0; opacity: 0;}
+    }
     canvas {
       position: absolute;
       top: 0;
@@ -45,7 +71,16 @@
   <canvas id="depthCanvas"></canvas>
   <button id="startButton" onclick="activateXR()">Start AR</button>
   <div id="depthDisplay">Depth: N/A</div>
+  <div id="toast" class="toast">Depth data available!</div>
   <script>
+    function showToast() {
+      const toast = document.getElementById("toast");
+      toast.className = "toast show";
+      setTimeout(() => {
+        toast.className = toast.className.replace("show", "");
+      }, 3000);
+    }
+
     async function activateXR() {
       try {
         const session = await navigator.xr.requestSession("immersive-ar");
@@ -68,7 +103,7 @@
             const depthInfo = frame.getDepthInformation(view);
 
             if (depthInfo) {
-              console.log("Depth info available");  // Debugging info
+              showToast();  // Show toast when depth info is available
               const { data, width, height, rawValueToMeters } = depthInfo;
               const centerX = Math.floor(width / 2);
               const centerY = Math.floor(height / 2);
