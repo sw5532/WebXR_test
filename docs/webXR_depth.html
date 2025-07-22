@@ -1,94 +1,66 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR Depth Visualization</title>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    /* The canvas will be under the DOM overlay */
-    #glCanvas { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-
-    /* This container will hold all visible UI elements */
-    #dom-overlay {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 10;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        pointer-events: none; /* Allows clicks to pass through to the canvas if needed */
-    }
-
-    #info {
-      color: white;
-      background-color: rgba(0, 0, 0, 0.7);
-      padding: 10px;
-      border-radius: 5px;
-      margin: 10px;
-      font-family: sans-serif;
-      pointer-events: auto; /* Re-enable pointer events for this element */
-    }
-
-    #startButton {
-      margin: 20px auto;
-      padding: 12px 24px;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-      font-size: 16px;
-      pointer-events: auto; /* Re-enable pointer events for the button */
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebXR Depth Debugging</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: sans-serif; }
+        #ar-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+        #glCanvas { width: 100%; height: 100%; z-index: -1; }
+        #overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: space-between;
+            pointer-events: none; z-index: 1;
+        }
+        #info-box, #start-button { pointer-events: auto; }
+        #info-box { margin: 20px; padding: 10px; background: rgba(0,0,0,0.7); color: white; border-radius: 8px; }
+        #start-button { margin: 20px auto; padding: 12px 24px; border: none; background-color: #007bff; color: white; border-radius: 8px; cursor: pointer; }
+    </style>
 </head>
 <body>
-  <!-- The WebGL canvas for rendering the depth visualization -->
-  <canvas id="glCanvas"></canvas>
+    <div id="ar-container">
+        <canvas id="glCanvas"></canvas>
+    </div>
 
-  <!-- This overlay will contain all the UI -->
-  <div id="dom-overlay">
-      <div id="info">
-          <div id="status">Click "Start AR" to begin</div>
-          <div id="depthDisplay">Depth at center: N/A</div>
-      </div>
-      <button id="startButton">Start AR</button>
-  </div>
+    <div id="overlay">
+        <div id="info-box">
+            <div>Status: <span id="status">Ready</span></div>
+            <div>Depth: <span id="depth-display">N/A</span></div>
+        </div>
+        <button id="start-button">Start AR</button>
+    </div>
 
-  <!-- Shaders (no changes needed here) -->
-  <script id="vertex-shader" type="x-shader/x-vertex">
-    attribute vec2 a_position;
-    varying vec2 v_texcoord;
-    void main() {
-      gl_Position = vec4(a_position, 0.0, 1.0);
-      v_texcoord = a_position * 0.5 + 0.5;
-      v_texcoord.y = 1.0 - v_texcoord.y;
-    }
-  </script>
-  <script id="fragment-shader" type="x-shader/x-fragment">
-    precision mediump float;
-    uniform sampler2D u_depthTexture;
-    varying vec2 v_texcoord;
-    void main() {
-      vec4 depthSample = texture2D(u_depthTexture, v_texcoord);
-      // Using luminance-alpha, depth is in the first (red) channel.
-      float depth = depthSample.r;
-      // Visualize depth: closer is brighter, further is transparent
-      float grey = clamp(1.0 - depth / 5.0, 0.0, 1.0); // Adjust '5.0' for range
-      gl_FragColor = vec4(grey, grey, grey, grey); // Use the greyscale value for alpha
-    }
-  </script>
+    <script id="vertex-shader" type="x-shader/x-vertex">
+      attribute vec2 a_position;
+      varying vec2 v_texcoord;
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texcoord = a_position * 0.5 + 0.5;
+        v_texcoord.y = 1.0 - v_texcoord.y; // Flip Y for texture coordinates
+      }
+    </script>
+    <script id="fragment-shader" type="x-shader/x-fragment">
+      precision mediump float;
+      uniform sampler2D u_depthTexture;
+      varying vec2 v_texcoord;
+      void main() {
+        float depthValue = texture2D(u_depthTexture, v_texcoord).r;
+        if (depthValue == 0.0) {
+            discard; // Don't draw where there's no depth data
+        }
+        // Visualize depth: closer is brighter white, fading to transparent
+        float visibility = clamp(1.0 - depthValue / 5.0, 0.0, 1.0);
+        gl_FragColor = vec4(1.0, 1.0, 1.0, visibility * 0.5);
+      }
+    </script>
 
-  <script>
-    const startButton = document.getElementById('startButton');
-    const depthDisplay = document.getElementById('depthDisplay');
-    const statusDisplay = document.getElementById('status');
+    <script>
+    const startButton = document.getElementById('start-button');
+    const statusEl = document.getElementById('status');
+    const depthEl = document.getElementById('depth-display');
+    const overlayEl = document.getElementById('overlay');
     const glCanvas = document.getElementById('glCanvas');
-    const domOverlayRoot = document.getElementById('dom-overlay'); // Get the overlay root
 
     let xrSession = null;
     let gl = null;
@@ -97,115 +69,156 @@
     let positionBuffer;
     let depthTextureUniform;
 
-    function initWebGL() {
-      gl = glCanvas.getContext('webgl', { xrCompatible: true });
-      if (!gl) {
-        statusDisplay.textContent = 'WebGL is not supported.';
-        return false;
-      }
-      // *** CHANGE 1: Set a transparent clear color ***
-      gl.clearColor(0.0, 0.0, 0.0, 0.0);
-
-      const vsSource = document.getElementById('vertex-shader').textContent;
-      const fsSource = document.getElementById('fragment-shader').textContent;
-      const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
-      const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
-      shaderProgram = createProgram(gl, vertexShader, fragmentShader);
-
-      depthTextureUniform = gl.getUniformLocation(shaderProgram, 'u_depthTexture');
-      const positionAttributeLocation = gl.getAttribLocation(shaderProgram, "a_position");
-
-      positionBuffer = gl.createBuffer();
-      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-
-      gl.enableVertexAttribArray(positionAttributeLocation);
-      gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
-      return true;
-    }
-
-    startButton.addEventListener('click', () => {
-      if (xrSession) {
-        xrSession.end();
-      } else {
-        if (initWebGL()) {
-          activateXR();
+    // --- Main Setup ---
+    document.addEventListener('DOMContentLoaded', () => {
+        if (!navigator.xr) {
+            statusEl.textContent = "WebXR not supported by this browser.";
+            startButton.disabled = true;
+            return;
         }
-      }
+        startButton.addEventListener('click', onStartButtonClick);
     });
 
-    async function activateXR() {
-      try {
-        // *** CHANGE 2: Request 'dom-overlay' and link it to your UI container ***
-        xrSession = await navigator.xr.requestSession("immersive-ar", {
-          requiredFeatures: ['local', 'depth-sensing'],
-          optionalFeatures: ['dom-overlay'], // Request the DOM overlay feature
-          domOverlay: { root: domOverlayRoot }, // Specify the root element
-          depthSensing: {
-            usagePreference: ["cpu-optimized"],
-            dataFormatPreference: ["luminance-alpha"]
-          }
-        });
+    function onStartButtonClick() {
+        if (xrSession) {
+            xrSession.end().catch(err => console.error("Session end failed:", err));
+        } else {
+            // Check for HTTPS
+            if (window.location.protocol !== 'https:') {
+                statusEl.textContent = "WebXR requires HTTPS. Please serve your page securely.";
+                return;
+            }
+            initializeXR();
+        }
+    }
 
-        statusDisplay.textContent = 'AR Session Started';
-        startButton.textContent = 'Exit AR';
-        domOverlayRoot.style.display = 'flex'; // Make sure overlay is visible
+    async function initializeXR() {
+        statusEl.textContent = "Initializing WebGL...";
+        if (!initializeWebGL()) return;
 
-        xrSession.addEventListener('end', () => {
-          xrSession = null;
-          startButton.textContent = 'Start AR';
-          statusDisplay.textContent = 'Click "Start AR" to begin';
-          depthDisplay.textContent = 'Depth at center: N/A';
-        });
+        try {
+            statusEl.textContent = "Requesting AR session...";
+            const session = await navigator.xr.requestSession("immersive-ar", {
+                requiredFeatures: ['local', 'depth-sensing'],
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: overlayEl },
+                depthSensing: {
+                    usagePreference: ["cpu-optimized", "gpu-optimized"],
+                    dataFormatPreference: ["luminance-alpha", "float32"]
+                }
+            });
 
-        // *** CHANGE 3: Enable alpha when creating the XRWebGLLayer ***
+            onSessionStarted(session);
+        } catch (error) {
+            console.error("WebXR session request failed:", error);
+            statusEl.textContent = `Error: ${error.message}. Check browser support and permissions.`;
+        }
+    }
+
+    function initializeWebGL() {
+        try {
+            gl = glCanvas.getContext('webgl', { xrCompatible: true });
+            gl.clearColor(0.0, 0.0, 0.0, 0.0); // Transparent background
+
+            const vs = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vertex-shader').textContent);
+            const fs = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fragment-shader').textContent);
+            shaderProgram = createProgram(gl, vs, fs);
+
+            depthTextureUniform = gl.getUniformLocation(shaderProgram, 'u_depthTexture');
+            const posAttrib = gl.getAttribLocation(shaderProgram, "a_position");
+
+            positionBuffer = gl.createBuffer();
+            gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+            gl.enableVertexAttribArray(posAttrib);
+            gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+
+            return true;
+        } catch (error) {
+            console.error("WebGL initialization failed:", error);
+            statusEl.textContent = "Failed to initialize WebGL.";
+            return false;
+        }
+    }
+
+    async function onSessionStarted(session) {
+        xrSession = session;
+        statusEl.textContent = "AR Session active.";
+        startButton.textContent = "Exit AR";
+
+        session.addEventListener('end', onSessionEnded);
+
         const glLayer = new XRWebGLLayer(xrSession, gl, { alpha: true });
         await xrSession.updateRenderState({ baseLayer: glLayer });
+
         xrReferenceSpace = await xrSession.requestReferenceSpace('local');
-
         xrSession.requestAnimationFrame(onXRFrame);
+    }
 
-      } catch (e) {
-        console.error("Failed to start AR session:", e);
-        statusDisplay.textContent = `Error: ${e.message}`;
-      }
+    function onSessionEnded() {
+        xrSession = null;
+        statusEl.textContent = "Ready";
+        startButton.textContent = "Start AR";
+        depthEl.textContent = "N/A";
+        console.log("WebXR session ended.");
     }
 
     function onXRFrame(time, frame) {
-      if (!xrSession) return;
-      xrSession.requestAnimationFrame(onXRFrame);
+        if (!xrSession) return;
+        xrSession.requestAnimationFrame(onXRFrame);
 
-      const pose = frame.getViewerPose(xrReferenceSpace);
-      if (!pose) return;
+        const pose = frame.getViewerPose(xrReferenceSpace);
+        if (!pose) return;
 
-      const glLayer = xrSession.renderState.baseLayer;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-      // This will now clear to transparent, allowing the camera to be seen
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        const glLayer = xrSession.renderState.baseLayer;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-      for (const view of pose.views) {
-        const depthInfo = frame.getDepthInformation(view);
-        if (depthInfo) {
-          const centerX = depthInfo.width / 2;
-          const centerY = depthInfo.height / 2;
-          const depthInMeters = depthInfo.getDepthInMeters(centerX, centerY);
-          depthDisplay.textContent = `Depth at center: ${depthInMeters.toFixed(2)}m`;
+        for (const view of pose.views) {
+            const depthInfo = frame.getDepthInformation(view);
+            if (depthInfo) {
+                // Display depth value from the center of the view
+                const centerX = Math.floor(depthInfo.width / 2);
+                const centerY = Math.floor(depthInfo.height / 2);
+                const depthInMeters = depthInfo.getDepthInMeters(centerX, centerY);
+                depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
 
-          const depthTexture = glLayer.getDepthInformation(view).texture;
-          gl.useProgram(shaderProgram);
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, depthTexture);
-          gl.uniform1i(depthTextureUniform, 0);
+                // Get the depth texture from the GPU
+                const depthTexture = glLayer.getDepthInformation(view).texture;
 
-          gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                // Render the depth visualization
+                gl.useProgram(shaderProgram);
+                gl.activeTexture(gl.TEXTURE0);
+                gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+                gl.uniform1i(depthTextureUniform, 0);
+                gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            } else {
+                depthEl.textContent = "Not available";
+            }
         }
-      }
     }
 
-    // --- WebGL Helper Functions (no changes needed) ---
-    function createShader(gl, type, source) { /* ... as before ... */ }
-    function createProgram(gl, vertexShader, fragmentShader) { /* ... as before ... */ }
-    // (I've omitted the helper function code for brevity, it's the same as the previous example)
-  </script>
+    // --- WebGL Helper Functions ---
+    function createShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            throw new Error('Shader compile error: ' + gl.getShaderInfoLog(shader));
+        }
+        return shader;
+    }
+    function createProgram(gl, vs, fs) {
+        const program = gl.createProgram();
+        gl.attachShader(program, vs);
+        gl.attachShader(program, fs);
+        gl.linkProgram(program);
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+            throw new Error('Program link error: ' + gl.getProgramInfoLog(program));
+        }
+        return program;
+    }
+    </script>
 </body>
 </html>
