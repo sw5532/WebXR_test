@@ -83,7 +83,7 @@
 
     async function activateXR() {
       try {
-        const session = await navigator.xr.requestSession("inline");
+        const session = await navigator.xr.requestSession("immersive-ar");
         const glCanvas = document.getElementById('depthCanvas');
         const gl = glCanvas.getContext("webgl", { xrCompatible: true });
         
