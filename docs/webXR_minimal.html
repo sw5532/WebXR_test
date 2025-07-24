@@ -70,8 +70,8 @@
                     optionalFeatures: ['dom-overlay', 'depth-sensing'],
                     domOverlay: { root: overlayEl },
                     depthSensing: {
-                        usagePreference: ["cpu-optimized"],
-                        dataFormatPreference: ["luminance-alpha"]
+                        usagePreference: ["gpu-optimized","cpu-optimized"],
+                        dataFormatPreference: ["float32","luminance-alpha"]
                     }
                 });
                 onSessionStarted(session);
@@ -88,7 +88,7 @@
 
             if (session.depthUsage) {
                 hasDepthFeature = true;
-                statusEl.textContent = `AR Active | Depth format: ${session.depthDataFormat}`;
+                statusEl.textContent = `AR Active | Depth format: ${session.depthDataFormat} | usage:${session.depthUsage}`;
             } else {
                 hasDepthFeature = false;
                 statusEl.textContent = "AR Active (Depth Sensing NOT supported/granted)";
