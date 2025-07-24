@@ -3,137 +3,125 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Robust WebXR Image Tracking</title>
+  <title>Native WebXR Image Tracking (Final Fix)</title>
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+    body { margin: 0; overflow: hidden; }
     canvas { display: block; }
-    #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; color: white; font-size: 16px; background-color: rgba(0,0,0,0.7); padding: 10px; box-sizing: border-box;}
-    button { font-size: 18px; padding: 12px 20px; position:absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; border-radius: 8px; border: none; background-color: #007aff; color: white; }
-    button:disabled { background-color: #555; }
+    #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; color: white; font-family: monospace; font-size: 16px; background-color: rgba(0,0,0,0.5); padding: 5px;}
+    button { font-size: 18px; padding: 10px; position:absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; }
   </style>
 </head>
 <body>
-  <div id="info">Checking for WebXR support...</div>
-  <button id="start-button" disabled>Start AR</button>
+  <div id="info">Point camera at the marker image.</div>
+  <button id="start-button">Start AR</button>
 
   <script>
-    const startButton = document.getElementById('start-button');
-    const infoElement = document.getElementById('info');
-
-    // --- Best Practice: Check for support first ---
-    document.addEventListener('DOMContentLoaded', async () => {
-      if (navigator.xr) {
-        // isSessionSupported is the first check.
-        const supported = await navigator.xr.isSessionSupported('immersive-ar');
-        if (supported) {
-          startButton.disabled = false;
-          startButton.textContent = "Start AR";
-          infoElement.innerText = "AR is supported! Click Start.";
-          startButton.addEventListener('click', activateXR);
-        } else {
-          infoElement.innerText = "Immersive AR is not supported on this device/browser.";
-        }
-      } else {
-        infoElement.innerText = "WebXR API not found. Use Chrome on an ARCore-supported Android device.";
-      }
-    });
-
+    document.getElementById('start-button').addEventListener('click', activateXR);
 
     async function activateXR() {
-      startButton.style.display = 'none';
+      // Hide the button and show the canvas
+      document.getElementById('start-button').style.display = 'none';
       const canvas = document.createElement("canvas");
       document.body.appendChild(canvas);
       const gl = canvas.getContext("webgl", { xrCompatible: true });
       const scene = new THREE.Scene();
+      const infoElement = document.getElementById('info');
 
-      // --- Boilerplate scene setup ---
+      // --- Load the image to be tracked from a reliable CDN ---
+      let trackedImageBitmap;
+      const markerUrl = "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.0/examples/image-tracking/assets/card-example/card.png";
+      try {
+        infoElement.innerText = "Downloading marker...";
+        const response = await fetch(markerUrl);
+        const blob = await response.blob();
+        trackedImageBitmap = await createImageBitmap(blob);
+        infoElement.innerText = "Marker downloaded. Starting XR...";
+      } catch (e) {
+        infoElement.innerText = "Error: Failed to load marker image.";
+        console.error("Failed to load image: ", e);
+        document.getElementById('start-button').style.display = 'block'; // Show button again
+        return;
+      }
+      
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
       const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
       scene.add(ambientLight);
+
       const renderer = new THREE.WebGLRenderer({ alpha: true, canvas: canvas, context: gl });
       renderer.autoClear = false;
+
       const camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
 
-      // --- Load resources first ---
-      let trackedImageBitmap;
-      const markerUrl = "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.0/examples/image-tracking/assets/card-example/card.png";
-      let flowerModel;
-      try {
-        infoElement.innerText = "Downloading resources...";
-        const [imageResponse, gltf] = await Promise.all([
-            fetch(markerUrl),
-            new THREE.GLTFLoader().loadAsync("https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf")
-        ]);
-        const blob = await imageResponse.blob();
-        trackedImageBitmap = await createImageBitmap(blob);
-        
-        flowerModel = gltf.scene;
-        flowerModel.scale.set(0.1, 0.1, 0.1);
-        flowerModel.visible = false;
-        scene.add(flowerModel);
-
-      } catch (e) {
-        infoElement.innerText = "Error: Failed to load resources.";
-        console.error("Resource loading failed: ", e);
-        startButton.style.display = 'block';
-        return;
-      }
-      
-      // --- Request a session and handle potential errors ---
-      let session;
-      try {
-        session = await navigator.xr.requestSession("immersive-ar", {
-          requiredFeatures: ['image-tracking'], // We ask for it here
-          trackedImages: [{
+      // --- Request a session with the 'image-tracking' feature ---
+      const session = await navigator.xr.requestSession("immersive-ar", {
+        requiredFeatures: ['image-tracking'],
+        trackedImages: [
+          {
             image: trackedImageBitmap,
-            widthInMeters: 0.1
-          }]
-        });
-      } catch (e) {
-        // This CATCH block is the crucial part for handling the feature support error
-        infoElement.innerHTML = `Failed to start AR session.<br><b>Image Tracking is likely not supported.</b><br>Please use latest Chrome on an ARCore-compatible Android device.`;
-        console.error("Failed to request session:", e);
-        startButton.style.display = 'block';
-        return;
-      }
-
-      // --- If successful, proceed ---
+            widthInMeters: 0.1 // Specify the real-world width of your marker
+          }
+        ]
+      });
       infoElement.innerText = "Point your camera at the marker image.";
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+
       const referenceSpace = await session.requestReferenceSpace('local');
-      
+
+      // --- Load the 3D model to place on the marker ---
+      const loader = new THREE.GLTFLoader();
+      let flowerModel;
+      loader.load("https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf", (gltf) => {
+        flowerModel = gltf.scene;
+        flowerModel.scale.set(0.1, 0.1, 0.1);
+        flowerModel.visible = false; // Initially hidden
+        scene.add(flowerModel);
+      });
+
       const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
-        const pose = frame.getViewerPose(referenceSpace);
-        if (!pose) return;
-
-        const results = frame.getTrackedImages();
-        let imageFound = false;
-        for (const result of results) {
-          const imagePose = frame.getPose(result.imageSpace, referenceSpace);
-          if (imagePose) {
-            flowerModel.position.copy(imagePose.transform.position);
-            flowerModel.quaternion.copy(imagePose.transform.orientation);
-            flowerModel.visible = true;
-            imageFound = true;
-            infoElement.innerText = `Tracking state: ${result.trackingState}`;
-          }
-        }
-        if (!imageFound) flowerModel.visible = false;
-
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
-        const view = pose.views[0];
-        const viewport = session.renderState.baseLayer.getViewport(view);
-        renderer.setSize(viewport.width, viewport.height);
-        camera.matrix.fromArray(view.transform.matrix);
-        camera.projectionMatrix.fromArray(view.projectionMatrix);
-        camera.updateMatrixWorld(true);
-        renderer.render(scene, camera);
+
+        const pose = frame.getViewerPose(referenceSpace);
+        if (pose) {
+          const view = pose.views[0];
+          const viewport = session.renderState.baseLayer.getViewport(view);
+          renderer.setSize(viewport.width, viewport.height);
+
+          camera.matrix.fromArray(view.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+          camera.updateMatrixWorld(true);
+
+          // --- Get tracking results for our image (USING THE NEW, CORRECT API) ---
+          const results = frame.getImageTrackingResults();
+
+          if (flowerModel) {
+            let imageFound = false;
+            // Loop through the results returned by the API
+            for (const result of results) {
+              const imagePose = frame.getPose(result.imageSpace, referenceSpace);
+              if (imagePose) {
+                // Update the model's position and orientation to match the marker
+                flowerModel.position.copy(imagePose.transform.position);
+                flowerModel.quaternion.copy(imagePose.transform.orientation);
+                flowerModel.visible = true;
+                imageFound = true;
+
+                // Provide feedback on the tracking quality
+                infoElement.innerText = `Tracking state: ${result.trackingState}`;
+              }
+            }
+            // Hide the model if the image is lost
+            if (!imageFound) {
+              flowerModel.visible = false;
+            }
+          }
+          renderer.render(scene, camera);
+        }
       };
       session.requestAnimationFrame(onXRFrame);
     }
