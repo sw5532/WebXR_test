@@ -1,21 +1,65 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Basic WebXR Depth Test</title>
     <style>
-        body { margin: 0; font-family: sans-serif; }
-        #ar-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
-        #glCanvas { width: 100%; height: 100%; }
-        #overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            display: flex; flex-direction: column; justify-content: space-between;
-            pointer-events: none; color: white; text-shadow: 1px 1px 2px black;
+        body {
+            margin: 0;
+            font-family: sans-serif;
         }
-        .info-box, #start-button { pointer-events: auto; }
-        .info-box { margin: 1em; padding: 1em; background: rgba(0, 0, 0, 0.6); border-radius: 8px; }
-        #start-button { margin: 1em auto; padding: 12px 24px; border: none; background-color: #007bff; color: white; border-radius: 8px; cursor: pointer; font-size: 16px; }
+
+        #ar-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #glCanvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        #overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            color: white;
+            text-shadow: 1px 1px 2px black;
+        }
+
+        .info-box,
+        #start-button {
+            pointer-events: auto;
+        }
+
+        .info-box {
+            margin: 1em;
+            padding: 1em;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 8px;
+        }
+
+        #start-button {
+            margin: 1em auto;
+            padding: 12px 24px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+        }
     </style>
 </head>
 
@@ -102,7 +146,7 @@
                 await gl.makeXRCompatible();
                 const glLayer = new XRWebGLLayer(xrSession, gl);
                 session.updateRenderState({ baseLayer: glLayer });
-            } catch(e) {
+            } catch (e) {
                 statusEl.textContent = `Error: Could not create WebGL layer. ${e.message}`;
                 session.end();
                 return;
@@ -121,28 +165,37 @@
             hasDepthFeature = false;
         }
 
-        // The render loop: simplified to ONLY get data, not draw.
         function onXRFrame(time, frame) {
             if (!xrSession) return;
-            session.requestAnimationFrame(onXRFrame);
+            xrSession.requestAnimationFrame(onXRFrame);
 
             const pose = frame.getViewerPose(xrReferenceSpace);
             if (!pose) {
                 depthEl.textContent = "Tracking lost. Move device.";
-                return; // Can't get depth if we don't know where the viewer is.
+                return; // Can't do anything without a pose.
             }
-            
-            // We need to bind the framebuffer to let the browser draw the camera image.
+
             const glLayer = session.renderState.baseLayer;
+
+            // This is the critical part that was missing.
+            // We must bind the framebuffer and set the viewport for each frame.
             gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-            // We don't clear or draw anything ourselves. The browser shows the camera.
 
-            if (hasDepthFeature) {
-                const view = pose.views[0];
-                if (view) {
-                    // This is the core API call we are testing
+            // Also, clear the buffer to prevent artifacts from previous frames.
+            // The clear color is transparent black (alpha = 0), so we see the camera behind it.
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+            const view = pose.views[0];
+            if (view) {
+                // Get the viewport for this specific view and apply it.
+                // This tells WebGL WHERE to draw on the framebuffer.
+                const viewport = glLayer.getViewport(view);
+                gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
+
+                // Now, we can proceed with trying to get depth information.
+                if (hasDepthFeature) {
                     const depthInfo = frame.getDepthInformation(view);
-
                     if (depthInfo) {
                         // SUCCESS! We have depth data.
                         const centerX = Math.floor(depthInfo.width / 2);
@@ -163,4 +216,5 @@
         }
     </script>
 </body>
+
 </html>
