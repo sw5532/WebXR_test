@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebXR Moving Anchor with a Cube</title>
+  <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
+  <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #info {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      z-index: 100;
+      display:block;
+      color: white;
+      font-family: monospace;
+      font-size: 24px;
+    }
+  </style>
+</head>
+<body>
+  <div id="info">Point at a surface and tap to place an anchor.</div>
+  <button onclick="activateXR()" style="position:absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100;">Start WebXR</button>
+  <script>
+    async function activateXR() {
+      const canvas = document.createElement("canvas");
+      document.body.appendChild(canvas);
+      const gl = canvas.getContext("webgl", { xrCompatible: true });
+
+      const scene = new THREE.Scene();
+      const infoElement = document.getElementById('info');
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(5, 10, 7.5);
+      scene.add(directionalLight);
+
+      const renderer = new THREE.WebGLRenderer({
+        alpha: true,
+        preserveDrawingBuffer: true,
+        canvas: canvas,
+        context: gl
+      });
+      renderer.autoClear = false;
+
+      const camera = new THREE.PerspectiveCamera();
+      camera.matrixAutoUpdate = false;
+
+      const session = await navigator.xr.requestSession("immersive-ar", {
+        requiredFeatures: ['hit-test', 'anchors']
+      });
+      session.updateRenderState({
+        baseLayer: new XRWebGLLayer(session, gl)
+      });
+
+      const referenceSpace = await session.requestReferenceSpace('local');
+      const viewerSpace = await session.requestReferenceSpace('viewer');
+      const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+
+      const loader = new THREE.GLTFLoader();
+      let reticle;
+      // You can change the reticle model here
+      loader.load("https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf", (gltf) => {
+        reticle = gltf.scene;
+        reticle.visible = false;
+        scene.add(reticle);
+      });
+
+      // Let's create a simple cube as our object to place.
+      // We will clone this mesh every time we place an anchor.
+      const cubeGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+      const cubeMaterial = new THREE.MeshStandardMaterial({ color: 0x00aaff });
+      const modelToPlace = new THREE.Mesh(cubeGeometry, cubeMaterial);
+
+
+      const trackedAnchors = [];
+
+      session.addEventListener("select", async (event) => {
+        if (reticle.visible && modelToPlace) {
+          // In a real app, you'd get the hit pose from the event frame for better accuracy
+          const hitTestResult = frame.getHitTestResults(hitTestSource);
+           if (hitTestResult.length > 0) {
+              const hitPose = hitTestResult[0].getPose(referenceSpace);
+              try {
+                const anchor = await frame.createAnchor(hitPose.transform, referenceSpace);
+                const clone = modelToPlace.clone(); // Clone our cube mesh
+                scene.add(clone);
+                trackedAnchors.push({ anchor: anchor, model: clone, lastDistance: 0 });
+                infoElement.innerText = "Anchor placed!";
+              } catch (error) {
+                console.error("Could not create anchor: ", error);
+              }
+           }
+        }
+      });
+
+      let frame; // Make frame accessible to the select event listener
+      const onXRFrame = (time, f) => {
+        frame = f; // Update the frame reference
+        session.requestAnimationFrame(onXRFrame);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+
+        const pose = frame.getViewerPose(referenceSpace);
+        if (pose) {
+          const view = pose.views[0];
+          const viewport = session.renderState.baseLayer.getViewport(view);
+          renderer.setSize(viewport.width, viewport.height);
+
+          camera.matrix.fromArray(view.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+          camera.updateMatrixWorld(true);
+
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+          if (hitTestResults.length > 0 && reticle) {
+            const hitPose = hitTestResults[0].getPose(referenceSpace);
+            reticle.visible = true;
+            reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
+            reticle.updateMatrixWorld(true);
+          } else {
+              if(reticle) reticle.visible = false;
+          }
+
+          let totalDistance = 0;
+          for (const tracked of trackedAnchors) {
+            const anchorPose = frame.getPose(tracked.anchor.anchorSpace, referenceSpace);
+            if (anchorPose) {
+                tracked.model.position.copy(anchorPose.transform.position);
+                tracked.model.quaternion.copy(anchorPose.transform.orientation);
+                
+                // Add a little spin for fun
+                tracked.model.rotation.y += 0.01;
+
+                const distance = tracked.model.position.distanceTo(camera.position);
+                tracked.lastDistance = distance;
+                totalDistance += distance;
+            }
+          }
+          if(trackedAnchors.length > 0) {
+              const avgDistance = totalDistance / trackedAnchors.length;
+              infoElement.innerText = `Avg. Distance: ${avgDistance.toFixed(2)}m`;
+          }
+
+
+          renderer.render(scene, camera);
+        }
+      };
+      session.requestAnimationFrame(onXRFrame);
+    }
+  </script>
+</body>
+</html>
