@@ -1,66 +1,21 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Basic WebXR Depth Test - Final Fix</title>
+    <title>Basic WebXR Depth Test - Robust</title>
     <style>
-        body {
-            margin: 0;
-            font-family: sans-serif;
-        }
-
-        #ar-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-        }
-
-        #glCanvas {
-            width: 100%;
-            height: 100%;
-        }
-
+        body { margin: 0; font-family: sans-serif; }
+        #ar-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+        #glCanvas { width: 100%; height: 100%; }
         #overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            pointer-events: none;
-            color: white;
-            text-shadow: 2px 2px 3px black;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: space-between;
+            pointer-events: none; color: white; text-shadow: 2px 2px 3px black;
         }
-
-        .info-box,
-        #start-button {
-            pointer-events: auto;
-        }
-
-        .info-box {
-            margin: 1em;
-            padding: 1em;
-            background: rgba(0, 0, 0, 0.7);
-            border-radius: 8px;
-            font-size: 1.1em;
-        }
-
-        #start-button {
-            margin: 1em auto;
-            padding: 12px 24px;
-            border: none;
-            background-color: #007bff;
-            color: white;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 18px;
-        }
+        .info-box, #start-button { pointer-events: auto; }
+        .info-box { margin: 1em; padding: 1em; background: rgba(0, 0, 0, 0.7); border-radius: 8px; font-size: 1.1em;}
+        #start-button { margin: 1em auto; padding: 12px 24px; border: none; background-color: #007bff; color: white; border-radius: 8px; cursor: pointer; font-size: 18px; }
     </style>
 </head>
 
@@ -85,26 +40,17 @@
         let gl = null;
         let xrReferenceSpace = null;
         let hasDepthFeature = false;
+        // --- NEW VARIABLE ---
+        let depthBytesPerPixel = 0;
 
         document.addEventListener('DOMContentLoaded', () => {
-            if (!navigator.xr) {
-                statusEl.textContent = "WebXR not supported by this browser.";
-                startButton.disabled = true;
-                return;
-            }
+            if (!navigator.xr) { statusEl.textContent = "WebXR not supported."; startButton.disabled = true; return; }
             startButton.addEventListener('click', onStartButtonClick);
         });
 
         function onStartButtonClick() {
-            if (xrSession) {
-                xrSession.end();
-            } else {
-                if (window.location.protocol !== 'https:') {
-                    statusEl.textContent = "WebXR requires a secure context (HTTPS).";
-                    return;
-                }
-                requestARSession();
-            }
+            if (xrSession) { xrSession.end(); }
+            else { if (window.location.protocol !== 'https:') { statusEl.textContent = "WebXR requires HTTPS."; return; } requestARSession(); }
         }
 
         async function requestARSession() {
@@ -114,16 +60,10 @@
                     requiredFeatures: ['local-floor'],
                     optionalFeatures: ['dom-overlay', 'depth-sensing'],
                     domOverlay: { root: overlayEl },
-                    depthSensing: {
-                        usagePreference: ["gpu-optimized", "cpu-optimized"],
-                        dataFormatPreference: ["float32", "luminance-alpha"]
-                    }
+                    depthSensing: { usagePreference: ["gpu-optimized", "cpu-optimized"], dataFormatPreference: ["float32", "luminance-alpha"] }
                 });
                 onSessionStarted(session);
-            } catch (error) {
-                console.error("WebXR session request failed:", error);
-                statusEl.textContent = `Error: ${error.message}`;
-            }
+            } catch (error) { console.error("WebXR session request failed:", error); statusEl.textContent = `Error: ${error.message}`; }
         }
 
         async function onSessionStarted(session) {
@@ -133,7 +73,13 @@
 
             if (session.depthUsage) {
                 hasDepthFeature = true;
-                statusEl.textContent = `AR Active | Depth format: ${session.depthDataFormat} | usage:${session.depthUsage}`;
+                statusEl.textContent = `AR Active | Depth format: ${session.depthDataFormat}`;
+                // --- NEW LOGIC: Determine bytes per pixel based on the granted format ---
+                if (session.depthDataFormat === 'luminance-alpha') {
+                    depthBytesPerPixel = 2; // 1 byte for luminance, 1 for alpha
+                } else if (session.depthDataFormat === 'float32') {
+                    depthBytesPerPixel = 4; // 32-bit float
+                }
             } else {
                 hasDepthFeature = false;
                 statusEl.textContent = "AR Active (Depth Sensing NOT supported/granted)";
@@ -145,34 +91,23 @@
                 await gl.makeXRCompatible();
                 const glLayer = new XRWebGLLayer(xrSession, gl);
                 session.updateRenderState({ baseLayer: glLayer });
-            } catch (e) {
-                statusEl.textContent = `Error: Could not create WebGL layer. ${e.message}`;
-                session.end();
-                return;
-            }
-
+            } catch(e) { statusEl.textContent = `Error: Could not create WebGL layer. ${e.message}`; session.end(); return; }
+            
             xrReferenceSpace = await session.requestReferenceSpace('local-floor');
             session.requestAnimationFrame(onXRFrame);
         }
 
-        function onSessionEnded() {
-            xrSession = null;
-            gl = null;
-            statusEl.textContent = "Ready";
-            startButton.textContent = "Start AR";
-            depthEl.textContent = "N/A";
-            hasDepthFeature = false;
+        function onSessionEnded() { /* Reset all state */
+            xrSession = null; gl = null; statusEl.textContent = "Ready";
+            startButton.textContent = "Start AR"; depthEl.textContent = "N/A";
+            hasDepthFeature = false; depthBytesPerPixel = 0;
         }
 
         function onXRFrame(time, frame) {
             if (!xrSession) return;
             xrSession.requestAnimationFrame(onXRFrame);
-
             const pose = frame.getViewerPose(xrReferenceSpace);
-            if (!pose) {
-                depthEl.textContent = "Tracking lost. Point at a textured surface.";
-                return;
-            }
+            if (!pose) { depthEl.textContent = "Tracking lost."; return; }
 
             const glLayer = xrSession.renderState.baseLayer;
             gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
@@ -184,34 +119,27 @@
                 const viewport = glLayer.getViewport(view);
                 gl.viewport(viewport.x, viewport.y, viewport.width, viewport.height);
 
-                if (hasDepthFeature) {
+                if (hasDepthFeature && depthBytesPerPixel > 0) {
                     const depthInfo = frame.getDepthInformation(view);
                     if (depthInfo) {
-                        // Check that the data buffer itself exists and has been allocated.
-                        if (depthInfo.data && depthInfo.data.byteLength > 0) {
-
-                            // --- THE CRITICAL FIX IS HERE ---
-                            // Before using width/height, ensure they are validly populated.
-                            if (depthInfo.width > 0 && depthInfo.height > 0) {
+                        // --- THE ULTIMATE SANITY CHECK ---
+                        if (depthInfo.data && depthInfo.width > 0 && depthInfo.height > 0) {
+                            const expectedByteLength = depthInfo.width * depthInfo.height * depthBytesPerPixel;
+                            if (depthInfo.data.byteLength >= expectedByteLength) {
+                                // IT IS FINALLY SAFE!
                                 const centerX = Math.floor(depthInfo.width / 2);
                                 const centerY = Math.floor(depthInfo.height / 2);
-
-                                // Now this call is safe.
                                 const depthInMeters = depthInfo.getDepthInMeters(centerX, centerY);
-
                                 if (depthInMeters) {
                                     statusEl.textContent = "SUCCESS!";
                                     depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
                                 } else {
-                                    // This can happen if the center pixel has no depth data (e.g., pointed at the sky).
                                     depthEl.textContent = "Depth unknown at center";
                                 }
                             } else {
-                                // We have a data buffer but no dimensions yet. Wait for the next frame.
-                                depthEl.textContent = "Finalizing data format...";
+                                // This is the specific error we were hitting!
+                                depthEl.textContent = "Resynchronizing data buffer...";
                             }
-                        } else {
-                            depthEl.textContent = "Waiting for data buffer...";
                         }
                     } else {
                         depthEl.textContent = "Initializing... Scan your environment.";
@@ -221,5 +149,4 @@
         }
     </script>
 </body>
-
 </html>
