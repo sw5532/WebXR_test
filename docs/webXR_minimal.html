@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Basic WebXR Depth Test - Tracking Fixed</title>
+    <title>Basic WebXR Depth Test - Final Fix</title>
     <style>
         body { margin: 0; font-family: sans-serif; }
         #ar-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
@@ -65,9 +65,8 @@
         async function requestARSession() {
             statusEl.textContent = "Requesting AR session...";
             try {
-                // *** CHANGE 1: We now list the reference spaces we intend to use. ***
                 const session = await navigator.xr.requestSession("immersive-ar", {
-                    requiredFeatures: ['local-floor'], // Ask for the best one first
+                    requiredFeatures: ['local-floor'],
                     optionalFeatures: ['dom-overlay', 'depth-sensing'],
                     domOverlay: { root: overlayEl },
                     depthSensing: {
@@ -107,10 +106,7 @@
                 return;
             }
             
-            // *** CHANGE 2: Request 'local-floor' as it is more robust. ***
             xrReferenceSpace = await session.requestReferenceSpace('local-floor');
-            console.log("Successfully created 'local-floor' reference space.");
-
             session.requestAnimationFrame(onXRFrame);
         }
 
@@ -125,17 +121,17 @@
 
         function onXRFrame(time, frame) {
             if (!xrSession) return;
-            session.requestAnimationFrame(onXRFrame);
+            // CORRECTED: Use the global xrSession variable to request the next frame.
+            xrSession.requestAnimationFrame(onXRFrame);
 
-            // This should now consistently return a valid pose.
             const pose = frame.getViewerPose(xrReferenceSpace);
             if (!pose) {
-                // If you still see this, the environment is likely the cause.
-                depthEl.textContent = "Tracking lost. Point device at a textured surface with good lighting.";
+                depthEl.textContent = "Tracking lost. Point at a textured surface.";
                 return; 
             }
 
-            const glLayer = session.renderState.baseLayer;
+            // CORRECTED: Use the global xrSession variable to get the render state.
+            const glLayer = xrSession.renderState.baseLayer;
             gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
             gl.clearColor(0, 0, 0, 0);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -158,7 +154,7 @@
                             depthEl.textContent = "Depth unknown at center";
                         }
                     } else {
-                        depthEl.textContent = "Initializing... Scan your environment by moving the device.";
+                        depthEl.textContent = "Initializing... Scan your environment.";
                     }
                 }
             }
