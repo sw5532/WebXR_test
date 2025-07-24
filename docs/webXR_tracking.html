@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR QR Code Tracking</title>
+  <title>Native WebXR Image Tracking (Fixed)</title>
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
   <style>
@@ -14,13 +14,14 @@
   </style>
 </head>
 <body>
-  <div id="info">Point camera at the QR code.</div>
+  <div id="info">Point camera at the marker image.</div>
   <button id="start-button">Start AR</button>
 
   <script>
     document.getElementById('start-button').addEventListener('click', activateXR);
 
     async function activateXR() {
+      // Hide the button and show the canvas
       document.getElementById('start-button').style.display = 'none';
       const canvas = document.createElement("canvas");
       document.body.appendChild(canvas);
@@ -28,11 +29,11 @@
       const scene = new THREE.Scene();
       const infoElement = document.getElementById('info');
 
-      // --- <<< CHANGED: URL now points to a QR code image ---
-      const markerUrl = "https://i.imgur.com/8p7tP0F.png";
+      // --- Load the image to be tracked from a reliable CDN ---
       let trackedImageBitmap;
+      const markerUrl = "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.0/examples/image-tracking/assets/card-example/card.png";
       try {
-        infoElement.innerText = "Downloading QR code marker...";
+        infoElement.innerText = "Downloading marker...";
         const response = await fetch(markerUrl);
         const blob = await response.blob();
         trackedImageBitmap = await createImageBitmap(blob);
@@ -40,7 +41,7 @@
       } catch (e) {
         infoElement.innerText = "Error: Failed to load marker image.";
         console.error("Failed to load image: ", e);
-        document.getElementById('start-button').style.display = 'block';
+        document.getElementById('start-button').style.display = 'block'; // Show button again
         return;
       }
       
@@ -56,28 +57,28 @@
       const camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
 
+      // --- Request a session with the 'image-tracking' feature ---
       const session = await navigator.xr.requestSession("immersive-ar", {
         requiredFeatures: ['image-tracking'],
         trackedImages: [
           {
             image: trackedImageBitmap,
-            // --- <<< CRITICAL: Change this value to the real-world width of your QR code ---
-            widthInMeters: 0.1 // e.g., 0.1 for 10cm
+            widthInMeters: 0.1 // Specify the real-world width of your marker
           }
         ]
       });
-      infoElement.innerText = "Point your camera at the QR code.";
+      infoElement.innerText = "Point your camera at the marker image.";
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
       const referenceSpace = await session.requestReferenceSpace('local');
 
+      // --- Load the 3D model to place on the marker ---
       const loader = new THREE.GLTFLoader();
       let flowerModel;
       loader.load("https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf", (gltf) => {
         flowerModel = gltf.scene;
-        // Adjust scale to look good on the marker
-        flowerModel.scale.set(0.2, 0.2, 0.2);
-        flowerModel.visible = false;
+        flowerModel.scale.set(0.1, 0.1, 0.1);
+        flowerModel.visible = false; // Initially hidden
         scene.add(flowerModel);
       });
 
@@ -95,20 +96,26 @@
           camera.projectionMatrix.fromArray(view.projectionMatrix);
           camera.updateMatrixWorld(true);
 
+          // --- Get tracking results for our image ---
           const results = frame.getTrackedImages();
 
           if (flowerModel) {
             let imageFound = false;
+            // Loop through the results returned by the API
             for (const result of results) {
               const imagePose = frame.getPose(result.imageSpace, referenceSpace);
               if (imagePose) {
+                // Update the model's position and orientation to match the marker
                 flowerModel.position.copy(imagePose.transform.position);
                 flowerModel.quaternion.copy(imagePose.transform.orientation);
                 flowerModel.visible = true;
                 imageFound = true;
+
+                // Provide feedback on the tracking quality
                 infoElement.innerText = `Tracking state: ${result.trackingState}`;
               }
             }
+            // Hide the model if the image is lost
             if (!imageFound) {
               flowerModel.visible = false;
             }
