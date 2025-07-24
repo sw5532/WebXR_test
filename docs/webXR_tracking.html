@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WebXR Moving Anchor with a Cube</title>
+  <title>WebXR Moving Anchor</title>
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
   <style>
@@ -23,8 +23,8 @@
   </style>
 </head>
 <body>
-  <div id="info">Point at a surface and tap to place an anchor.</div>
-  <button onclick="activateXR()" style="position:absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100;">Start WebXR</button>
+  <div id="info">Tap to place an anchor on an object.</div>
+  <button onclick="activateXR()" style="position:absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100;">Start Hello WebXR</button>
   <script>
     async function activateXR() {
       const canvas = document.createElement("canvas");
@@ -34,10 +34,11 @@
       const scene = new THREE.Scene();
       const infoElement = document.getElementById('info');
 
-      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      directionalLight.position.set(5, 10, 7.5);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+      directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
 
       const renderer = new THREE.WebGLRenderer({
         alpha: true,
@@ -46,10 +47,13 @@
         context: gl
       });
       renderer.autoClear = false;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
       const camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
 
+      // Request 'anchors' feature
       const session = await navigator.xr.requestSession("immersive-ar", {
         requiredFeatures: ['hit-test', 'anchors']
       });
@@ -63,44 +67,43 @@
 
       const loader = new THREE.GLTFLoader();
       let reticle;
-      // You can change the reticle model here
       loader.load("https://immersive-web.github.io/webxr-samples/media/gltf/reticle/reticle.gltf", (gltf) => {
         reticle = gltf.scene;
         reticle.visible = false;
         scene.add(reticle);
       });
 
-      // Let's create a simple cube as our object to place.
-      // We will clone this mesh every time we place an anchor.
-      const cubeGeometry = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-      const cubeMaterial = new THREE.MeshStandardMaterial({ color: 0x00aaff });
-      const modelToPlace = new THREE.Mesh(cubeGeometry, cubeMaterial);
+      let flowerModel;
+      loader.load("https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf", (gltf) => {
+        flowerModel = gltf.scene;
+      });
 
-
+      // Array to store our anchors and associated objects
       const trackedAnchors = [];
 
       session.addEventListener("select", async (event) => {
-        if (reticle.visible && modelToPlace) {
-          // In a real app, you'd get the hit pose from the event frame for better accuracy
-          const hitTestResult = frame.getHitTestResults(hitTestSource);
-           if (hitTestResult.length > 0) {
-              const hitPose = hitTestResult[0].getPose(referenceSpace);
-              try {
-                const anchor = await frame.createAnchor(hitPose.transform, referenceSpace);
-                const clone = modelToPlace.clone(); // Clone our cube mesh
-                scene.add(clone);
-                trackedAnchors.push({ anchor: anchor, model: clone, lastDistance: 0 });
-                infoElement.innerText = "Anchor placed!";
-              } catch (error) {
-                console.error("Could not create anchor: ", error);
-              }
-           }
+        if (reticle.visible && flowerModel) {
+          const hitPose = event.frame.getHitTestResults(hitTestSource)[0].getPose(referenceSpace);
+
+          // Create an anchor at the hit-test position
+          try {
+            const anchor = await event.frame.createAnchor(hitPose.transform, referenceSpace);
+            const clone = flowerModel.clone();
+            clone.visible = true;
+            scene.add(clone);
+
+            // Store the anchor and its 3D model together
+            trackedAnchors.push({ anchor: anchor, model: clone });
+            infoElement.innerText = "Anchor placed!";
+
+          } catch (error) {
+            console.error("Could not create anchor: ", error);
+            infoElement.innerText = "Error: Could not create anchor.";
+          }
         }
       });
 
-      let frame; // Make frame accessible to the select event listener
-      const onXRFrame = (time, f) => {
-        frame = f; // Update the frame reference
+      const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
@@ -121,29 +124,21 @@
             reticle.position.set(hitPose.transform.position.x, hitPose.transform.position.y, hitPose.transform.position.z);
             reticle.updateMatrixWorld(true);
           } else {
-              if(reticle) reticle.visible = false;
+              reticle.visible = false;
           }
 
-          let totalDistance = 0;
+          // Update tracked objects' positions
           for (const tracked of trackedAnchors) {
             const anchorPose = frame.getPose(tracked.anchor.anchorSpace, referenceSpace);
             if (anchorPose) {
                 tracked.model.position.copy(anchorPose.transform.position);
                 tracked.model.quaternion.copy(anchorPose.transform.orientation);
-                
-                // Add a little spin for fun
-                tracked.model.rotation.y += 0.01;
 
+                // Update distance calculation continuously
                 const distance = tracked.model.position.distanceTo(camera.position);
-                tracked.lastDistance = distance;
-                totalDistance += distance;
+                infoElement.innerText = `Distance: ${distance.toFixed(2)}m`;
             }
           }
-          if(trackedAnchors.length > 0) {
-              const avgDistance = totalDistance / trackedAnchors.length;
-              infoElement.innerText = `Avg. Distance: ${avgDistance.toFixed(2)}m`;
-          }
-
 
           renderer.render(scene, camera);
         }
