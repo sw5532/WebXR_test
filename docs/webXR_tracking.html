@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Native WebXR Image Tracking (Final Fix)</title>
+  <title>Multi-Image Tracking with WebXR (Corrected)</title>
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
   <style>
@@ -14,14 +14,13 @@
   </style>
 </head>
 <body>
-  <div id="info">Point camera at the marker image.</div>
+  <div id="info">Point camera at the marker images.</div>
   <button id="start-button">Start AR</button>
 
   <script>
     document.getElementById('start-button').addEventListener('click', activateXR);
 
     async function activateXR() {
-      // Hide the button and show the canvas
       document.getElementById('start-button').style.display = 'none';
       const canvas = document.createElement("canvas");
       document.body.appendChild(canvas);
@@ -29,22 +28,42 @@
       const scene = new THREE.Scene();
       const infoElement = document.getElementById('info');
 
-      // --- Load the image to be tracked from a reliable CDN ---
-      let trackedImageBitmap;
-      const markerUrl = "https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.0/examples/image-tracking/assets/card-example/card.png";
+      // --- Define the images and models to be tracked ---
+      const trackedObjects = [
+        {
+          name: "marker1",
+          markerUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/marker1.png",
+          modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/Houseplant.glb",
+          scale: new THREE.Vector3(0.1, 0.1, 0.1),
+          bitmap: null,
+          model: null
+        },
+        {
+          name: "marker2",
+          markerUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/marker2.png",
+          modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/sunflower.gltf", // Using .gltf, ensure all its assets (.bin, textures) are in the same repo path
+          scale: new THREE.Vector3(0.05, 0.05, 0.05),
+          bitmap: null,
+          model: null
+        }
+      ];
+
+      // --- Load all marker images ---
+      infoElement.innerText = "Downloading markers...";
       try {
-        infoElement.innerText = "Downloading marker...";
-        const response = await fetch(markerUrl);
-        const blob = await response.blob();
-        trackedImageBitmap = await createImageBitmap(blob);
-        infoElement.innerText = "Marker downloaded. Starting XR...";
+        for (const trackedObject of trackedObjects) {
+          const response = await fetch(trackedObject.markerUrl);
+          const blob = await response.blob();
+          trackedObject.bitmap = await createImageBitmap(blob);
+        }
+        infoElement.innerText = "Markers downloaded. Starting XR...";
       } catch (e) {
-        infoElement.innerText = "Error: Failed to load marker image.";
+        infoElement.innerText = "Error: Failed to load a marker image.";
         console.error("Failed to load image: ", e);
-        document.getElementById('start-button').style.display = 'block'; // Show button again
+        document.getElementById('start-button').style.display = 'block';
         return;
       }
-      
+
       const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
       directionalLight.position.set(10, 15, 10);
       scene.add(directionalLight);
@@ -57,71 +76,86 @@
       const camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
 
-      // --- Request a session with the 'image-tracking' feature ---
+      const trackedImages = trackedObjects.map(obj => ({
+        image: obj.bitmap,
+        widthInMeters: 0.1
+      }));
+
       const session = await navigator.xr.requestSession("immersive-ar", {
         requiredFeatures: ['image-tracking'],
-        trackedImages: [
-          {
-            image: trackedImageBitmap,
-            widthInMeters: 0.1 // Specify the real-world width of your marker
-          }
-        ]
+        trackedImages: trackedImages
       });
-      infoElement.innerText = "Point your camera at the marker image.";
+      infoElement.innerText = "Point your camera at the marker images.";
       session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
 
       const referenceSpace = await session.requestReferenceSpace('local');
 
-      // --- Load the 3D model to place on the marker ---
+      // --- Load all 3D models ---
       const loader = new THREE.GLTFLoader();
-      let flowerModel;
-      loader.load("https://immersive-web.github.io/webxr-samples/media/gltf/sunflower/sunflower.gltf", (gltf) => {
-        flowerModel = gltf.scene;
-        flowerModel.scale.set(0.1, 0.1, 0.1);
-        flowerModel.visible = false; // Initially hidden
-        scene.add(flowerModel);
-      });
-
+      for (const trackedObject of trackedObjects) {
+        loader.load(trackedObject.modelUrl, (gltf) => {
+          trackedObject.model = gltf.scene;
+          trackedObject.model.scale.copy(trackedObject.scale);
+          trackedObject.model.visible = false; // Initially hidden
+          scene.add(trackedObject.model);
+        });
+      }
+      
       const onXRFrame = (time, frame) => {
         session.requestAnimationFrame(onXRFrame);
         gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
 
         const pose = frame.getViewerPose(referenceSpace);
-        if (pose) {
-          const view = pose.views[0];
-          const viewport = session.renderState.baseLayer.getViewport(view);
-          renderer.setSize(viewport.width, viewport.height);
+        if (!pose) {
+          return;
+        }
 
-          camera.matrix.fromArray(view.transform.matrix);
-          camera.projectionMatrix.fromArray(view.projectionMatrix);
-          camera.updateMatrixWorld(true);
+        const view = pose.views[0];
+        const viewport = session.renderState.baseLayer.getViewport(view);
+        renderer.setSize(viewport.width, viewport.height);
 
-          // --- Get tracking results for our image (USING THE NEW, CORRECT API) ---
-          const results = frame.getImageTrackingResults();
+        camera.matrix.fromArray(view.transform.matrix);
+        camera.projectionMatrix.fromArray(view.projectionMatrix);
+        camera.updateMatrixWorld(true);
 
-          if (flowerModel) {
-            let imageFound = false;
-            // Loop through the results returned by the API
-            for (const result of results) {
-              const imagePose = frame.getPose(result.imageSpace, referenceSpace);
-              if (imagePose) {
-                // Update the model's position and orientation to match the marker
-                flowerModel.position.copy(imagePose.transform.position);
-                flowerModel.quaternion.copy(imagePose.transform.orientation);
-                flowerModel.visible = true;
-                imageFound = true;
+        const results = frame.getImageTrackingResults();
+        
+        // Create a set of found indices for this frame.
+        const foundIndices = new Set();
 
-                // Provide feedback on the tracking quality
-                infoElement.innerText = `Tracking state: ${result.trackingState}`;
-              }
-            }
-            // Hide the model if the image is lost
-            if (!imageFound) {
-              flowerModel.visible = false;
+        // Loop through the tracking results
+        for (const result of results) {
+          // Add the index to our set of found images
+          foundIndices.add(result.index);
+          
+          const trackedObject = trackedObjects[result.index];
+          
+          // Ensure the model is loaded before trying to access it
+          if (trackedObject && trackedObject.model) {
+            const imagePose = frame.getPose(result.imageSpace, referenceSpace);
+            
+            if (imagePose) {
+              // Update the model's position and orientation
+              trackedObject.model.position.copy(imagePose.transform.position);
+              trackedObject.model.quaternion.copy(imagePose.transform.orientation);
+              trackedObject.model.visible = true; // Make sure it's visible
+
+              infoElement.innerText = `Tracking ${trackedObject.name}: ${result.trackingState}`;
             }
           }
-          renderer.render(scene, camera);
         }
+
+        // Hide models for any images that were NOT found in this frame
+        for (let i = 0; i < trackedObjects.length; i++) {
+            if (!foundIndices.has(i)) {
+                const trackedObject = trackedObjects[i];
+                if (trackedObject && trackedObject.model) {
+                    trackedObject.model.visible = false;
+                }
+            }
+        }
+        
+        renderer.render(scene, camera);
       };
       session.requestAnimationFrame(onXRFrame);
     }
