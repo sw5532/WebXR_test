@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multi-Image Tracking with WebXR</title>
+  <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
+  <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; color: white; font-family: monospace; font-size: 16px; background-color: rgba(0,0,0,0.5); padding: 5px;}
+    button { font-size: 18px; padding: 10px; position:absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; }
+  </style>
+</head>
+<body>
+  <div id="info">Point camera at the marker images.</div>
+  <button id="start-button">Start AR</button>
+
+  <script>
+    document.getElementById('start-button').addEventListener('click', activateXR);
+
+    async function activateXR() {
+      document.getElementById('start-button').style.display = 'none';
+      const canvas = document.createElement("canvas");
+      document.body.appendChild(canvas);
+      const gl = canvas.getContext("webgl", { xrCompatible: true });
+      const scene = new THREE.Scene();
+      const infoElement = document.getElementById('info');
+
+      // --- Define the images and models to be tracked ---
+      const trackedObjects = [
+        {
+          name: "marker1",
+          markerUrl: "/assets/marker1.png",
+          modelUrl: "/assets/Houseplant.glb",
+          scale: new THREE.Vector3(0.1, 0.1, 0.1),
+          bitmap: null,
+          model: null,
+          visible: false
+        },
+        {
+          name: "marker2",
+          markerUrl: "/assets/marker2.png",
+          modelUrl: "/assets/sunflower.gltf",
+          scale: new THREE.Vector3(0.05, 0.05, 0.05),
+          bitmap: null,
+          model: null,
+          visible: false
+        }
+        // To add more tracked objects, simply copy the object structure above
+      ];
+
+      // --- Load all marker images ---
+      infoElement.innerText = "Downloading markers...";
+      try {
+        for (const trackedObject of trackedObjects) {
+          const response = await fetch(trackedObject.markerUrl);
+          const blob = await response.blob();
+          trackedObject.bitmap = await createImageBitmap(blob);
+        }
+        infoElement.innerText = "Markers downloaded. Starting XR...";
+      } catch (e) {
+        infoElement.innerText = "Error: Failed to load a marker image.";
+        console.error("Failed to load image: ", e);
+        document.getElementById('start-button').style.display = 'block';
+        return;
+      }
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(10, 15, 10);
+      scene.add(directionalLight);
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
+
+      const renderer = new THREE.WebGLRenderer({ alpha: true, canvas: canvas, context: gl });
+      renderer.autoClear = false;
+
+      const camera = new THREE.PerspectiveCamera();
+      camera.matrixAutoUpdate = false;
+
+      // --- Request a session with 'image-tracking' and provide all tracked images ---
+      const trackedImages = trackedObjects.map(obj => ({
+        image: obj.bitmap,
+        widthInMeters: 0.1
+      }));
+
+      const session = await navigator.xr.requestSession("immersive-ar", {
+        requiredFeatures: ['image-tracking'],
+        trackedImages: trackedImages
+      });
+      infoElement.innerText = "Point your camera at the marker images.";
+      session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+
+      const referenceSpace = await session.requestReferenceSpace('local');
+
+      // --- Load all 3D models ---
+      const loader = new THREE.GLTFLoader();
+      for (const trackedObject of trackedObjects) {
+        loader.load(trackedObject.modelUrl, (gltf) => {
+          trackedObject.model = gltf.scene;
+          trackedObject.model.scale.copy(trackedObject.scale);
+          trackedObject.model.visible = false; // Initially hidden
+          scene.add(trackedObject.model);
+        });
+      }
+
+      const onXRFrame = (time, frame) => {
+        session.requestAnimationFrame(onXRFrame);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, session.renderState.baseLayer.framebuffer);
+
+        const pose = frame.getViewerPose(referenceSpace);
+        if (pose) {
+          const view = pose.views[0];
+          const viewport = session.renderState.baseLayer.getViewport(view);
+          renderer.setSize(viewport.width, viewport.height);
+
+          camera.matrix.fromArray(view.transform.matrix);
+          camera.projectionMatrix.fromArray(view.projectionMatrix);
+          camera.updateMatrixWorld(true);
+
+          const results = frame.getImageTrackingResults();
+
+          // Reset visibility for all models at the start of the frame
+          for (const trackedObject of trackedObjects) {
+            if (trackedObject.model) {
+              trackedObject.visible = false;
+            }
+          }
+
+          for (const result of results) {
+            const imageIndex = result.index;
+            const trackedObject = trackedObjects[imageIndex];
+
+            if (trackedObject && trackedObject.model) {
+              const imagePose = frame.getPose(result.imageSpace, referenceSpace);
+              if (imagePose) {
+                trackedObject.model.position.copy(imagePose.transform.position);
+                trackedObject.model.quaternion.copy(imagePose.transform.orientation);
+                trackedObject.visible = true;
+
+                infoElement.innerText = `Tracking ${trackedObject.name}: ${result.trackingState}`;
+              }
+            }
+          }
+
+          // Update visibility of models based on tracking
+          for (const trackedObject of trackedObjects) {
+            if (trackedObject.model) {
+              trackedObject.model.visible = trackedObject.visible;
+            }
+          }
+          renderer.render(scene, camera);
+        }
+      };
+      session.requestAnimationFrame(onXRFrame);
+    }
+  </script>
+</body>
+</html>
