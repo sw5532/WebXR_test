@@ -1,23 +1,69 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WebXR Robust Depth Example</title>
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; }
-        #ar-container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
-        #glCanvas { width: 100%; height: 100%; z-index: -1; }
-        #overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            display: flex; flex-direction: column; justify-content: space-between;
-            pointer-events: none; z-index: 1;
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: sans-serif;
         }
-        #info-box, #start-button { pointer-events: auto; }
-        #info-box { margin: 20px; padding: 10px; background: rgba(0,0,0,0.7); color: white; border-radius: 8px; }
-        #start-button { margin: 20px auto; padding: 12px 24px; border: none; background-color: #007bff; color: white; border-radius: 8px; cursor: pointer; }
+
+        #ar-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        #glCanvas {
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }
+
+        #overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        #info-box,
+        #start-button {
+            pointer-events: auto;
+        }
+
+        #info-box {
+            margin: 20px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 8px;
+        }
+
+        #start-button {
+            margin: 20px auto;
+            padding: 12px 24px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 8px;
+            cursor: pointer;
+        }
     </style>
 </head>
+
 <body>
     <div id="ar-container"><canvas id="glCanvas"></canvas></div>
     <div id="overlay">
@@ -44,137 +90,146 @@
     </script>
 
     <script>
-    // --- Elements and State (No Change) ---
-    const startButton = document.getElementById('start-button');
-    const statusEl = document.getElementById('status');
-    const depthEl = document.getElementById('depth-display');
-    const overlayEl = document.getElementById('overlay');
-    const glCanvas = document.getElementById('glCanvas');
-    let xrSession = null, gl = null, xrReferenceSpace = null;
-    let shaderProgram, positionBuffer, depthTextureUniform;
-    let hasDepthFeature = false; // *** NEW: Flag to track if we have depth support
+        // --- Elements and State (No Change) ---
+        const startButton = document.getElementById('start-button');
+        const statusEl = document.getElementById('status');
+        const depthEl = document.getElementById('depth-display');
+        const overlayEl = document.getElementById('overlay');
+        const glCanvas = document.getElementById('glCanvas');
+        let xrSession = null, gl = null, xrReferenceSpace = null;
+        let shaderProgram, positionBuffer, depthTextureUniform;
+        let hasDepthFeature = false; // *** NEW: Flag to track if we have depth support
 
-    // --- Startup Listeners (No Change) ---
-    document.addEventListener('DOMContentLoaded', () => {
-        if (!navigator.xr) { statusEl.textContent = "WebXR not supported."; startButton.disabled = true; return; }
-        startButton.addEventListener('click', onStartButtonClick);
-    });
+        // --- Startup Listeners (No Change) ---
+        document.addEventListener('DOMContentLoaded', () => {
+            if (!navigator.xr) { statusEl.textContent = "WebXR not supported."; startButton.disabled = true; return; }
+            startButton.addEventListener('click', onStartButtonClick);
+        });
 
-    function onStartButtonClick() {
-        if (xrSession) {
-            xrSession.end().catch(err => console.error("Session end failed:", err));
-        } else {
-            if (window.location.protocol !== 'https:') { statusEl.textContent = "WebXR requires HTTPS."; return; }
-            initializeXR();
+        function onStartButtonClick() {
+            if (xrSession) {
+                xrSession.end().catch(err => console.error("Session end failed:", err));
+            } else {
+                if (window.location.protocol !== 'https:') { statusEl.textContent = "WebXR requires HTTPS."; return; }
+                initializeXR();
+            }
         }
-    }
 
-    async function initializeXR() {
-        statusEl.textContent = "Initializing WebGL...";
-        if (!initializeWebGL()) return;
+        async function initializeXR() {
+            statusEl.textContent = "Initializing WebGL...";
+            if (!initializeWebGL()) return;
 
-        try {
-            statusEl.textContent = "Requesting AR session...";
-            // *** CHANGE: 'depth-sensing' is now OPTIONAL, not required ***
-            const session = await navigator.xr.requestSession("immersive-ar", {
-                requiredFeatures: ['local'],
-                optionalFeatures: ['dom-overlay', 'depth-sensing'], // Moved here
-                domOverlay: { root: overlayEl },
-                depthSensing: { // We can still provide our preferences
-                    usagePreference: ["cpu-optimized", "gpu-optimized"],
-                    dataFormatPreference: ["luminance-alpha", "float32"]
-                }
-            });
-            onSessionStarted(session);
-        } catch (error) {
-            console.error("WebXR session request failed:", error);
-            statusEl.textContent = `Error: ${error.message}`;
+            try {
+                statusEl.textContent = "Requesting AR session...";
+                // *** CHANGE: 'depth-sensing' is now OPTIONAL, not required ***
+                const session = await navigator.xr.requestSession("immersive-ar", {
+                    requiredFeatures: ['local'],
+                    optionalFeatures: ['dom-overlay', 'depth-sensing'], // Moved here
+                    domOverlay: { root: overlayEl },
+                    depthSensing: { // We can still provide our preferences
+                        usagePreference: ["cpu-optimized", "gpu-optimized"],
+                        dataFormatPreference: ["luminance-alpha", "float32"]
+                    }
+                });
+                onSessionStarted(session);
+            } catch (error) {
+                console.error("WebXR session request failed:", error);
+                statusEl.textContent = `Error: ${error.message}`;
+            }
         }
-    }
 
-    // --- WebGL Initialization (No Change) ---
-    function initializeWebGL() { /* ... function is identical to before ... */
-        try { gl = glCanvas.getContext('webgl', { xrCompatible: true }); gl.clearColor(0,0,0,0);
-            const vs = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vertex-shader').textContent);
-            const fs = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fragment-shader').textContent);
-            shaderProgram = createProgram(gl, vs, fs);
-            depthTextureUniform = gl.getUniformLocation(shaderProgram, 'u_depthTexture');
-            const posAttrib = gl.getAttribLocation(shaderProgram, "a_position");
-            positionBuffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
-            gl.enableVertexAttribArray(posAttrib); gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
-            return true;
-        } catch (e) { console.error(e); statusEl.textContent = "WebGL Init Failed."; return false; }
-    }
+        // --- WebGL Initialization (No Change) ---
+        function initializeWebGL() { /* ... function is identical to before ... */
+            try {
+                gl = glCanvas.getContext('webgl', { xrCompatible: true }); gl.clearColor(0, 0, 0, 0);
+                const vs = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vertex-shader').textContent);
+                const fs = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fragment-shader').textContent);
+                shaderProgram = createProgram(gl, vs, fs);
+                depthTextureUniform = gl.getUniformLocation(shaderProgram, 'u_depthTexture');
+                const posAttrib = gl.getAttribLocation(shaderProgram, "a_position");
+                positionBuffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+                gl.enableVertexAttribArray(posAttrib); gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+                return true;
+            } catch (e) { console.error(e); statusEl.textContent = "WebGL Init Failed."; return false; }
+        }
 
-    async function onSessionStarted(session) {
-        xrSession = session;
-        startButton.textContent = "Exit AR";
-        session.addEventListener('end', onSessionEnded);
+        async function onSessionStarted(session) {
+            xrSession = session;
+            startButton.textContent = "Exit AR";
+            session.addEventListener('end', onSessionEnded);
 
-        // *** CHANGE: Check if depth was successfully enabled ***
-        if (session.depthUsage) {
-            hasDepthFeature = true;
-            statusEl.textContent = `AR Active | Depth: ${session.depthUsage}`;
-            console.log("Depth Sensing is available and enabled.");
-        } else {
+            // *** CHANGE: Check if depth was successfully enabled ***
+            if (session.depthUsage) {
+                hasDepthFeature = true;
+                statusEl.textContent = `AR Active | Depth: ${session.depthUsage}`;
+                console.log("Depth Sensing is available and enabled.");
+            } else {
+                hasDepthFeature = false;
+                statusEl.textContent = "AR Active (No Depth Support)";
+                depthEl.textContent = "Not supported on this device.";
+                console.warn("Depth Sensing feature was requested but is not available.");
+            }
+
+            const glLayer = new XRWebGLLayer(xrSession, gl, { alpha: true });
+            await xrSession.updateRenderState({ baseLayer: glLayer });
+            xrReferenceSpace = await xrSession.requestReferenceSpace('local');
+            xrSession.requestAnimationFrame(onXRFrame);
+        }
+
+        function onSessionEnded() {
+            xrSession = null;
+            statusEl.textContent = "Ready";
+            startButton.textContent = "Start AR";
+            depthEl.textContent = "N/A";
             hasDepthFeature = false;
-            statusEl.textContent = "AR Active (No Depth Support)";
-            depthEl.textContent = "Not supported on this device.";
-            console.warn("Depth Sensing feature was requested but is not available.");
         }
 
-        const glLayer = new XRWebGLLayer(xrSession, gl, { alpha: true });
-        await xrSession.updateRenderState({ baseLayer: glLayer });
-        xrReferenceSpace = await xrSession.requestReferenceSpace('local');
-        xrSession.requestAnimationFrame(onXRFrame);
-    }
+        function onXRFrame(time, frame) {
+            if (!xrSession) return;
+            xrSession.requestAnimationFrame(onXRFrame);
 
-    function onSessionEnded() {
-        xrSession = null;
-        statusEl.textContent = "Ready";
-        startButton.textContent = "Start AR";
-        depthEl.textContent = "N/A";
-        hasDepthFeature = false;
-    }
+            const pose = frame.getViewerPose(xrReferenceSpace);
+            if (!pose) return;
 
-    function onXRFrame(time, frame) {
-        if (!xrSession) return;
-        xrSession.requestAnimationFrame(onXRFrame);
+            const glLayer = xrSession.renderState.baseLayer;
+            gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
+            gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-        const pose = frame.getViewerPose(xrReferenceSpace);
-        if (!pose) return;
+            // *** CHANGE: Only try to render depth if the feature is available ***
+            if (hasDepthFeature) {
+                const view = pose.views[0];
+                if (view) {
+                    // *** CHANGE: Use glLayer.getDepthInformation for the texture ***
+                    const depthInfo = glLayer.getDepthInformation(view);
+                    if (depthInfo) {
+                        // For CPU-based depth value display, you still need frame.getDepthInformation
+                        const cpuDepthInfo = frame.getDepthInformation(view);
+                        if (cpuDepthInfo) {
+                            const centerX = Math.floor(cpuDepthInfo.width / 2);
+                            const centerY = Math.floor(cpuDepthInfo.height / 2);
+                            const depthInMeters = cpuDepthInfo.getDepthInMeters(centerX, centerY);
+                            depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
+                        }
 
-        const glLayer = xrSession.renderState.baseLayer;
-        gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-        // *** CHANGE: Only try to render depth if the feature is available ***
-        if (hasDepthFeature) {
-            const view = pose.views[0];
-            if (view) {
-                const depthInfo = frame.getDepthInformation(view);
-                if (depthInfo) {
-                    const centerX = Math.floor(depthInfo.width / 2);
-                    const centerY = Math.floor(depthInfo.height / 2);
-                    const depthInMeters = depthInfo.getDepthInMeters(centerX, centerY);
-                    depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
-                    const depthTexture = glLayer.getDepthInformation(view).texture;
-                    gl.useProgram(shaderProgram);
-                    gl.activeTexture(gl.TEXTURE0);
-                    gl.bindTexture(gl.TEXTURE_2D, depthTexture);
-                    gl.uniform1i(depthTextureUniform, 0);
-                    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-                } else {
-                    depthEl.textContent = "Initializing...";
+                        // Use the texture from glLayer's depth info for rendering
+                        const depthTexture = depthInfo.texture;
+                        gl.useProgram(shaderProgram);
+                        gl.activeTexture(gl.TEXTURE0);
+                        gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+                        gl.uniform1i(depthTextureUniform, 0);
+                        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                    } else {
+                        depthEl.textContent = "Initializing...";
+                    }
                 }
             }
         }
-    }
 
-    // --- WebGL Helpers (No Change) ---
-    function createShader(gl, type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { throw new Error(gl.getShaderInfoLog(s)); } return s; }
-    function createProgram(gl, vs, fs) { const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { throw new Error(gl.getProgramInfoLog(p)); } return p; }
+        // --- WebGL Helpers (No Change) ---
+        function createShader(gl, type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { throw new Error(gl.getShaderInfoLog(s)); } return s; }
+        function createProgram(gl, vs, fs) { const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { throw new Error(gl.getProgramInfoLog(p)); } return p; }
     </script>
 </body>
+
 </html>
