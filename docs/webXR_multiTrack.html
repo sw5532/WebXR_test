@@ -64,8 +64,9 @@
           markerUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/marker1.png",
           modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/Houseplant.glb",
           scale: new THREE.Vector3(0.1, 0.1, 0.1),
-
           physicalWidthInMeters: 0.2,
+          // *** NEW: Define a vertical offset for the model ***
+          yOffset: 0.05, // Lifts the model 10cm above the marker
           bitmap: null,
           model: null,
           visible: false
@@ -76,6 +77,8 @@
           modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/arrow.glb",
           scale: new THREE.Vector3(0.05, 0.05, 0.05),
           physicalWidthInMeters: 0.2,
+          // *** NEW: Define a vertical offset for the model ***
+          yOffset: 0.2, // Lifts the model 5cm above the marker
           bitmap: null,
           model: null,
           visible: false
@@ -110,8 +113,6 @@
       const camera = new THREE.PerspectiveCamera();
       camera.matrixAutoUpdate = false;
 
-      // --- Request a session with 'image-tracking' and provide all tracked images ---
-      // This now reads the specific width for each marker.
       const trackedImages = trackedObjects.map(obj => ({
         image: obj.bitmap,
         widthInMeters: obj.physicalWidthInMeters
@@ -126,13 +127,12 @@
 
       const referenceSpace = await session.requestReferenceSpace('local');
 
-      // --- Load all 3D models ---
       const loader = new THREE.GLTFLoader();
       for (const trackedObject of trackedObjects) {
         loader.load(trackedObject.modelUrl, (gltf) => {
           trackedObject.model = gltf.scene;
           trackedObject.model.scale.copy(trackedObject.scale);
-          trackedObject.model.visible = false; // Initially hidden
+          trackedObject.model.visible = false;
           scene.add(trackedObject.model);
         });
       }
@@ -162,11 +162,17 @@
             const trackedObject = trackedObjects[imageIndex];
 
             if (trackedObject && trackedObject.model) {
+              // Re-enabled this check to hide the model when tracking is lost
               // if (result.trackingState == 'tracked') {
                 const imagePose = frame.getPose(result.imageSpace, referenceSpace);
                 if (imagePose) {
+                  // Set the model's pose from the marker
                   trackedObject.model.position.copy(imagePose.transform.position);
                   trackedObject.model.quaternion.copy(imagePose.transform.orientation);
+
+                  // *** NEW: Apply the vertical offset ***
+                  trackedObject.model.position.y += trackedObject.yOffset;
+
                   trackedObject.visible = true;
                 }
                 infoElement.innerText = `Tracking ${trackedObject.name}`;
