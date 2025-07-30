@@ -162,7 +162,7 @@
             const trackedObject = trackedObjects[imageIndex];
 
             if (trackedObject && trackedObject.model) {
-              if (result.trackingState == 'tracked') {
+              // if (result.trackingState == 'tracked') {
                 const imagePose = frame.getPose(result.imageSpace, referenceSpace);
                 if (imagePose) {
                   trackedObject.model.position.copy(imagePose.transform.position);
@@ -170,7 +170,7 @@
                   trackedObject.visible = true;
                 }
                 infoElement.innerText = `Tracking ${trackedObject.name}`;
-              }
+              // }
             }
           }
 
