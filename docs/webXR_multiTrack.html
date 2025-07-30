@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,12 +8,40 @@
   <script src="https://unpkg.com/three@0.126.0/build/three.js"></script>
   <script src="https://unpkg.com/three@0.126.0/examples/js/loaders/GLTFLoader.js"></script>
   <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
-    #info { position: absolute; top: 10px; width: 100%; text-align: center; z-index: 100; color: white; font-family: monospace; font-size: 16px; background-color: rgba(0,0,0,0.5); padding: 5px;}
-    button { font-size: 18px; padding: 10px; position:absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 100; }
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #info {
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      z-index: 100;
+      color: white;
+      font-family: monospace;
+      font-size: 16px;
+      background-color: rgba(0, 0, 0, 0.5);
+      padding: 5px;
+    }
+
+    button {
+      font-size: 18px;
+      padding: 10px;
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100;
+    }
   </style>
 </head>
+
 <body>
   <div id="info">Point camera at the marker images.</div>
   <button id="start-button">Start AR</button>
@@ -121,30 +150,35 @@
 
           const results = frame.getImageTrackingResults();
 
-          // Reset visibility for all models at the start of the frame
+          // Reset a custom visibility flag for all models at the start of the frame.
           for (const trackedObject of trackedObjects) {
-            if (trackedObject.model) {
-              trackedObject.visible = false;
-            }
+            trackedObject.visible = false;
           }
 
+          // Check the tracking results to see which markers are currently detected.
           for (const result of results) {
             const imageIndex = result.index;
             const trackedObject = trackedObjects[imageIndex];
 
-            if (trackedObject && trackedObject.model) {
-              const imagePose = frame.getPose(result.imageSpace, referenceSpace);
-              if (imagePose) {
-                trackedObject.model.position.copy(imagePose.transform.position);
-                trackedObject.model.quaternion.copy(imagePose.transform.orientation);
-                trackedObject.visible = true;
-
-                infoElement.innerText = `Tracking ${trackedObject.name}: ${result.trackingState}`;
+            if (trackedObject && trackedObject.model) {/*  */
+              if (result.trackingState == 'tracked') {
+                const imagePose = frame.getPose(result.imageSpace, referenceSpace);
+                if (imagePose) {
+                  trackedObject.model.position.copy(imagePose.transform.position);
+                  trackedObject.model.quaternion.copy(imagePose.transform.orientation);
+                  // Mark this object as visible for this frame.
+                  trackedObject.visible = true;
+                }
+                infoElement.innerText = `Tracking ${trackedObject.name}`;
               }
             }
           }
 
-          // Update visibility of models based on tracking
+          if (results.every(result => result.trackingState !== 'tracked')) {
+            infoElement.innerText = "Point camera at the marker images.";
+          }
+
+          // Update the actual visibility of the three.js models based on our flag.
           for (const trackedObject of trackedObjects) {
             if (trackedObject.model) {
               trackedObject.model.visible = trackedObject.visible;
@@ -157,4 +191,5 @@
     }
   </script>
 </body>
+
 </html>
