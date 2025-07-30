@@ -69,6 +69,8 @@
     <div id="overlay">
         <div id="info-box">
             <div>Status: <span id="status">Ready</span></div>
+            <div>Depth Usage: <span id="depth-usage-display">N/A</span></div>
+            <div>Depth Format: <span id="depth-format-display">N/A</span></div>
             <div>Depth: <span id="depth-display">N/A</span></div>
         </div>
         <button id="start-button">Start AR</button>
@@ -90,17 +92,16 @@
     </script>
 
     <script>
-        // --- Elements and State (No Change) ---
         const startButton = document.getElementById('start-button');
         const statusEl = document.getElementById('status');
+        const depthUsageEl = document.getElementById('depth-usage-display');
+        const depthFormatEl = document.getElementById('depth-format-display');
         const depthEl = document.getElementById('depth-display');
         const overlayEl = document.getElementById('overlay');
         const glCanvas = document.getElementById('glCanvas');
         let xrSession = null, gl = null, xrReferenceSpace = null;
         let shaderProgram, positionBuffer, depthTextureUniform;
-        let hasDepthFeature = false; // *** NEW: Flag to track if we have depth support
 
-        // --- Startup Listeners (No Change) ---
         document.addEventListener('DOMContentLoaded', () => {
             if (!navigator.xr) { statusEl.textContent = "WebXR not supported."; startButton.disabled = true; return; }
             startButton.addEventListener('click', onStartButtonClick);
@@ -121,12 +122,11 @@
 
             try {
                 statusEl.textContent = "Requesting AR session...";
-                // *** CHANGE: 'depth-sensing' is now OPTIONAL, not required ***
                 const session = await navigator.xr.requestSession("immersive-ar", {
                     requiredFeatures: ['local'],
-                    optionalFeatures: ['dom-overlay', 'depth-sensing'], // Moved here
+                    optionalFeatures: ['dom-overlay', 'depth-sensing'],
                     domOverlay: { root: overlayEl },
-                    depthSensing: { // We can still provide our preferences
+                    depthSensing: {
                         usagePreference: ["cpu-optimized", "gpu-optimized"],
                         dataFormatPreference: ["luminance-alpha", "float32"]
                     }
@@ -138,20 +138,27 @@
             }
         }
 
-        // --- WebGL Initialization (No Change) ---
-        function initializeWebGL() { /* ... function is identical to before ... */
+        function initializeWebGL() {
             try {
-                gl = glCanvas.getContext('webgl', { xrCompatible: true }); gl.clearColor(0, 0, 0, 0);
+                gl = glCanvas.getContext('webgl', { xrCompatible: true });
+                if (!gl) throw new Error("WebGL not supported");
+                gl.clearColor(0, 0, 0, 0);
                 const vs = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vertex-shader').textContent);
                 const fs = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fragment-shader').textContent);
                 shaderProgram = createProgram(gl, vs, fs);
                 depthTextureUniform = gl.getUniformLocation(shaderProgram, 'u_depthTexture');
                 const posAttrib = gl.getAttribLocation(shaderProgram, "a_position");
-                positionBuffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+                positionBuffer = gl.createBuffer();
+                gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
                 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-                gl.enableVertexAttribArray(posAttrib); gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
+                gl.enableVertexAttribArray(posAttrib);
+                gl.vertexAttribPointer(posAttrib, 2, gl.FLOAT, false, 0, 0);
                 return true;
-            } catch (e) { console.error(e); statusEl.textContent = "WebGL Init Failed."; return false; }
+            } catch (e) {
+                console.error("WebGL Init Failed:", e);
+                statusEl.textContent = "WebGL Init Failed.";
+                return false;
+            }
         }
 
         async function onSessionStarted(session) {
@@ -159,14 +166,15 @@
             startButton.textContent = "Exit AR";
             session.addEventListener('end', onSessionEnded);
 
-            // *** CHANGE: Check if depth was successfully enabled ***
             if (session.depthUsage) {
-                hasDepthFeature = true;
-                statusEl.textContent = `AR Active | Depth: ${session.depthUsage}`;
-                console.log("Depth Sensing is available and enabled.");
+                statusEl.textContent = "AR Active";
+                depthUsageEl.textContent = session.depthUsage;
+                depthFormatEl.textContent = session.depthDataFormat;
+                console.log(`Depth Sensing enabled with usage: ${session.depthUsage} and format: ${session.depthDataFormat}`);
             } else {
-                hasDepthFeature = false;
-                statusEl.textContent = "AR Active (No Depth Support)";
+                statusEl.textContent = "AR Active (No Depth)";
+                depthUsageEl.textContent = "Not available";
+                depthFormatEl.textContent = "Not available";
                 depthEl.textContent = "Not supported on this device.";
                 console.warn("Depth Sensing feature was requested but is not available.");
             }
@@ -181,8 +189,9 @@
             xrSession = null;
             statusEl.textContent = "Ready";
             startButton.textContent = "Start AR";
+            depthUsageEl.textContent = "N/A";
+            depthFormatEl.textContent = "N/A";
             depthEl.textContent = "N/A";
-            hasDepthFeature = false;
         }
 
         function onXRFrame(time, frame) {
@@ -196,42 +205,66 @@
             gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            if (hasDepthFeature) {
-                const view = pose.views[0];
-                if (view) {
-                    const gpuDepthInfo = glLayer.getDepthInformation(view);
-                    if (gpuDepthInfo) {
-                        // First, handle the GPU rendering part
-                        const depthTexture = gpuDepthInfo.texture;
-                        gl.useProgram(shaderProgram);
-                        gl.activeTexture(gl.TEXTURE0);
-                        gl.bindTexture(gl.TEXTURE_2D, depthTexture);
-                        gl.uniform1i(depthTextureUniform, 0);
-                        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+            if (!xrSession.depthUsage) return;
 
-                        // Now, try to get CPU data for the text display
-                        const cpuDepthInfo = frame.getDepthInformation(view);
-                        if (cpuDepthInfo) {
-                            const centerX = Math.floor(cpuDepthInfo.width / 2);
-                            const centerY = Math.floor(cpuDepthInfo.height / 2);
-                            const depthInMeters = cpuDepthInfo.getDepthInMeters(centerX, centerY);
-                            if (depthInMeters) {
-                                depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
-                            }
-                        } else {
-                            // This will show if we have a GPU texture but no CPU access
-                            depthEl.textContent = "Visualizing...";
-                        }
-                    } else {
-                        depthEl.textContent = "Initializing...";
-                    }
+            const view = pose.views[0];
+            if (!view) return;
+
+            // Handle GPU-optimized depth data for visualization
+            if (xrSession.depthUsage.includes('gpu-optimized')) {
+                const depthInfo = glLayer.getDepthInformation(view);
+                if (depthInfo) {
+                    const depthTexture = depthInfo.texture;
+                    gl.useProgram(shaderProgram);
+                    gl.activeTexture(gl.TEXTURE0);
+                    gl.bindTexture(gl.TEXTURE_2D, depthTexture);
+                    gl.uniform1i(depthTextureUniform, 0);
+                    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+                } else {
+                    depthEl.textContent = "Initializing GPU depth...";
                 }
+            }
+
+            // Handle CPU-optimized depth data for reading values
+            if (xrSession.depthUsage.includes('cpu-optimized')) {
+                const depthInfo = frame.getDepthInformation(view);
+                if (depthInfo) {
+                    const centerX = Math.floor(depthInfo.width / 2);
+                    const centerY = Math.floor(depthInfo.height / 2);
+                    const depthInMeters = depthInfo.getDepthInMeters(centerX, centerY);
+                    if (depthInMeters) {
+                        depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
+                    } else {
+                         depthEl.textContent = `Reading...`;
+                    }
+                } else {
+                    depthEl.textContent = "Initializing CPU depth...";
+                }
+            } else if (!xrSession.depthUsage.includes('cpu-optimized') && xrSession.depthUsage.includes('gpu-optimized')) {
+                 depthEl.textContent = "Visualizing (no CPU access)";
             }
         }
 
-        // --- WebGL Helpers (No Change) ---
-        function createShader(gl, type, source) { const s = gl.createShader(type); gl.shaderSource(s, source); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) { throw new Error(gl.getShaderInfoLog(s)); } return s; }
-        function createProgram(gl, vs, fs) { const p = gl.createProgram(); gl.attachShader(p, vs); gl.attachShader(p, fs); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { throw new Error(gl.getProgramInfoLog(p)); } return p; }
+        function createShader(gl, type, source) {
+            const s = gl.createShader(type);
+            gl.shaderSource(s, source);
+            gl.compileShader(s);
+            if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+                throw new Error(gl.getShaderInfoLog(s));
+            }
+            return s;
+        }
+
+        function createProgram(gl, vs, fs) {
+            const p = gl.createProgram();
+            gl.attachShader(p, vs);
+            gl.attachShader(p, fs);
+            gl.linkProgram(p);
+            if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+                throw new Error(gl.getProgramInfoLog(p));
+            }
+            return p;
+        }
     </script>
 </body>
 
