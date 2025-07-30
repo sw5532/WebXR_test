@@ -1,3 +1,4 @@
+html
 <!DOCTYPE html>
 <html lang="en">
 
@@ -64,6 +65,8 @@
           markerUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/marker1.png",
           modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/Houseplant.glb",
           scale: new THREE.Vector3(0.1, 0.1, 0.1),
+
+          physicalWidthInMeters: 0.85,
           bitmap: null,
           model: null,
           visible: false
@@ -71,13 +74,13 @@
         {
           name: "marker2",
           markerUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/marker2.png",
-          modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/bendfurndouble.glb",
+          modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/arrow.glb",
           scale: new THREE.Vector3(0.05, 0.05, 0.05),
+          physicalWidthInMeters: 0.85,
           bitmap: null,
           model: null,
           visible: false
         }
-        // To add more tracked objects, simply copy the object structure above
       ];
 
       // --- Load all marker images ---
@@ -109,9 +112,10 @@
       camera.matrixAutoUpdate = false;
 
       // --- Request a session with 'image-tracking' and provide all tracked images ---
+      // This now reads the specific width for each marker.
       const trackedImages = trackedObjects.map(obj => ({
         image: obj.bitmap,
-        widthInMeters: 0.1
+        widthInMeters: obj.physicalWidthInMeters
       }));
 
       const session = await navigator.xr.requestSession("immersive-ar", {
@@ -150,23 +154,20 @@
 
           const results = frame.getImageTrackingResults();
 
-          // Reset a custom visibility flag for all models at the start of the frame.
           for (const trackedObject of trackedObjects) {
             trackedObject.visible = false;
           }
 
-          // Check the tracking results to see which markers are currently detected.
           for (const result of results) {
             const imageIndex = result.index;
             const trackedObject = trackedObjects[imageIndex];
 
-            if (trackedObject && trackedObject.model) {/*  */
+            if (trackedObject && trackedObject.model) {
               if (result.trackingState == 'tracked') {
                 const imagePose = frame.getPose(result.imageSpace, referenceSpace);
                 if (imagePose) {
                   trackedObject.model.position.copy(imagePose.transform.position);
                   trackedObject.model.quaternion.copy(imagePose.transform.orientation);
-                  // Mark this object as visible for this frame.
                   trackedObject.visible = true;
                 }
                 infoElement.innerText = `Tracking ${trackedObject.name}`;
@@ -178,7 +179,6 @@
             infoElement.innerText = "Point camera at the marker images.";
           }
 
-          // Update the actual visibility of the three.js models based on our flag.
           for (const trackedObject of trackedObjects) {
             if (trackedObject.model) {
               trackedObject.model.visible = trackedObject.visible;
