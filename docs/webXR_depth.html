@@ -196,29 +196,32 @@
             gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
             gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-            // *** CHANGE: Only try to render depth if the feature is available ***
             if (hasDepthFeature) {
                 const view = pose.views[0];
                 if (view) {
-                    // *** CHANGE: Use glLayer.getDepthInformation for the texture ***
-                    const depthInfo = glLayer.getDepthInformation(view);
-                    if (depthInfo) {
-                        // For CPU-based depth value display, you still need frame.getDepthInformation
-                        const cpuDepthInfo = frame.getDepthInformation(view);
-                        if (cpuDepthInfo) {
-                            const centerX = Math.floor(cpuDepthInfo.width / 2);
-                            const centerY = Math.floor(cpuDepthInfo.height / 2);
-                            const depthInMeters = cpuDepthInfo.getDepthInMeters(centerX, centerY);
-                            depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
-                        }
-
-                        // Use the texture from glLayer's depth info for rendering
-                        const depthTexture = depthInfo.texture;
+                    const gpuDepthInfo = glLayer.getDepthInformation(view);
+                    if (gpuDepthInfo) {
+                        // First, handle the GPU rendering part
+                        const depthTexture = gpuDepthInfo.texture;
                         gl.useProgram(shaderProgram);
                         gl.activeTexture(gl.TEXTURE0);
                         gl.bindTexture(gl.TEXTURE_2D, depthTexture);
                         gl.uniform1i(depthTextureUniform, 0);
                         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+                        // Now, try to get CPU data for the text display
+                        const cpuDepthInfo = frame.getDepthInformation(view);
+                        if (cpuDepthInfo) {
+                            const centerX = Math.floor(cpuDepthInfo.width / 2);
+                            const centerY = Math.floor(cpuDepthInfo.height / 2);
+                            const depthInMeters = cpuDepthInfo.getDepthInMeters(centerX, centerY);
+                            if (depthInMeters) {
+                                depthEl.textContent = `${depthInMeters.toFixed(2)}m`;
+                            }
+                        } else {
+                            // This will show if we have a GPU texture but no CPU access
+                            depthEl.textContent = "Visualizing...";
+                        }
                     } else {
                         depthEl.textContent = "Initializing...";
                     }
