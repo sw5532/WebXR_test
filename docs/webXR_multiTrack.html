@@ -32,7 +32,7 @@
       const trackedObjects = [
         {
           name: "marker1",
-          markerUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/marker1.png",
+          markerUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/shuttlecock_barcode.jpg",
           modelUrl: "https://raw.githubusercontent.com/sw5532/WebXR_test/hostWebXR/assets/Houseplant.glb",
           scale: new THREE.Vector3(0.1, 0.1, 0.1),
           bitmap: null,
@@ -82,7 +82,7 @@
       // --- Request a session with 'image-tracking' and provide all tracked images ---
       const trackedImages = trackedObjects.map(obj => ({
         image: obj.bitmap,
-        widthInMeters: 0.1
+        widthInMeters: 0.01
       }));
 
       const session = await navigator.xr.requestSession("immersive-ar", {
